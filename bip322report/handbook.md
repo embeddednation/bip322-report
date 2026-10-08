@@ -3,7 +3,7 @@
 What the holder does, what the auditor does, and what the pieces are. The
 command references are the three READMEs ([bip322-core](https://github.com/embeddednation/bip322-core),
 [bip322-audit](https://github.com/embeddednation/bip322-audit),
-[bip322-report](https://github.com/embeddednation/bip322-report)); this is the flow. `bip322-report handbook` prints this file. The holder's
+[bip322-report](https://github.com/embeddednation/bip322-report)); this is the flow. `bip322 report handbook` prints this file. The holder's
 side of it, from the first bundle to the statements (one of them with
 `--dust`), is exercised by `examples/report_walkthrough.sh` on a throwaway
 regtest node; it writes into a fresh directory, or into a new or empty one
@@ -23,7 +23,7 @@ given as its argument.
   the block it names. Control of a scriptPubKey covers every UTXO locked to
   it, before or after the proof; a UTXO that arrived after the proof is
   covered only by a later proof.
-* **A bundle** is one round of proofs: `bip322-audit snapshot` or `prove`
+* **A bundle** is one round of proofs: `bip322 audit snapshot` or `prove`
   writes `snapshot.json`, `message.txt` and `to_sign/to_sign-NN.psbt` (one
   per address); the signers fill `signed/`; `finalize` writes
   `proofs.json`, the only file an auditor needs from it. `proofs.json`
@@ -34,16 +34,16 @@ given as its argument.
   so the ledger stays with the holder; the statement copies out only the
   `proofs.json` of each bundle it cites. Back the ledger up like the
   wallet's own records.
-* **The statement** (`bip322-report`) is the document for the
+* **The statement** (`bip322 report`) is the document for the
   auditor: opening and closing balances, the movements, the closing UTXOs
   each backed by a verified proof, one page per UTXO with the two commands
   that check it, a section on how a proof works, and notes.
 
 ## Install
 
-One line into a fresh venv brings all three packages and the commands
-`bip322`, `bip322-audit`, `bip322-report` (and `bip322 audit …`,
-`bip322 report …` as git-style aliases):
+One line into a fresh venv brings all three packages and the command
+`bip322`, whose `bip322 audit …` and `bip322 report …` run the programs
+`bip322-audit` and `bip322-report`, git style:
 
 ```sh
 python3 -m venv ~/.bip322
@@ -68,7 +68,7 @@ selects the wallet.
 Some days into January, when the closing block is buried:
 
 ```sh
-bip322-audit -w treasury snapshot --text "Proof of control {date}" -o ledger/2026-year-end
+bip322 audit -w treasury snapshot --text "Proof of control {date}" -o ledger/2026-year-end
 ```
 
 The stamp is the block six behind the tip; the bundle lists every funded
@@ -91,12 +91,12 @@ signing devices can display (`bip322 lint-message`).
 ### Finalize, verify, report
 
 ```sh
-bip322-audit finalize ledger/2026-year-end          # combines, finalises, self-verifies, writes proofs.json
-bip322-audit verify ledger/2026-year-end             # what the auditor will run; should end in OK
-bip322-report -w treasury --year 2026 --ledger ledger --dust 1000 --pdf -o treasury-2026
+bip322 audit finalize ledger/2026-year-end          # combines, finalises, self-verifies, writes proofs.json
+bip322 audit verify ledger/2026-year-end             # what the auditor will run; should end in OK
+bip322 report -w treasury --year 2026 --ledger ledger --dust 1000 --pdf -o treasury-2026
 ```
 
-`bip322-report` reads the wallet's history from the node, verifies every bundle in
+`bip322 report` reads the wallet's history from the node, verifies every bundle in
 the ledger against the node, picks for each closing UTXO a proof of its
 script (a verified one first, then one whose bundle lists that very UTXO,
 then the newest), looks each UTXO up on the chain at the block of its proof,
@@ -135,9 +135,9 @@ No other bundle of the ledger is copied or named. Never the ledger itself.
 prove it before broadcasting:
 
 ```sh
-bip322-audit -w treasury prove bc1q…change… --text "Proof of control {date}" --ledger ledger
+bip322 audit -w treasury prove bc1q…change… --text "Proof of control {date}" --ledger ledger
 # sign to_sign/*.psbt, put the results in signed/, then
-bip322-audit finalize ledger/snapshot-<date>-<height>     # VALID -> broadcast
+bip322 audit finalize ledger/snapshot-<date>-<height>     # VALID -> broadcast
 ```
 
 A valid proof means the quorum controls where the change goes. In a
@@ -148,14 +148,14 @@ it a proof dated after it.
 **New deposit addresses.** Prove them the same way, or after the fact:
 
 ```sh
-bip322-audit -w treasury snapshot --text "Proof of control {date}" --skip-proven ledger
+bip322 audit -w treasury snapshot --text "Proof of control {date}" --skip-proven ledger
 ```
 
 which takes a bundle over the funded addresses the ledger has not proven
 yet, and exits non-zero saying so when there are none (in a script, treat
 that as "nothing to do").
 
-**A statement at any time.** `bip322-report --from 2026-01-01 --to 2026-07-01 --ledger ledger`,
+**A statement at any time.** `bip322 report --from 2026-01-01 --to 2026-07-01 --ledger ledger`,
 or `--year`, or block heights. Everything in it is backed by the holder's own
 proofs; the year-end statement is the same document with the auditor's
 bundle.
@@ -174,7 +174,7 @@ script interpreter as a second engine; bip322-report is not needed to verify).
    and by others: its fee is unknown and shown as such, its amount is the
    wallet's net.
 2. **Re-verify the bundles** on your own node:
-   `bip322-audit verify treasury-2026/ledger/2026-year-end/proofs.json`.
+   `bip322 audit verify treasury-2026/ledger/2026-year-end/proofs.json`.
    This checks every signature with every engine installed, that the
    block named in the message exists at that height with that time, and
    that every output the file lists existed at that block.

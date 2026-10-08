@@ -15,10 +15,10 @@ A statement answers, for a wallet and a period:
 
 Two ways of working with it, the same tool for both:
 
-* **Continuously, for yourself.** Before broadcasting a spend, prove its change address (`bip322-audit prove ADDRESS --ledger LEDGER`, sign, finalize): a valid proof means the quorum controls where the change goes. New deposit addresses the same way, or with `snapshot --skip-proven LEDGER` after the fact. A report can then be produced at any time, with every coin backed by your own signed message; a coin that arrived after its proof is marked as such (the proof shows control, not the holding).
-* **On demand, for an auditor.** After the period's end, take one full bundle (no `--skip-proven`) over every output under a message that names the audit, and produce the report for the year. Every closing coin then has a proof dated after the closing block, and the chain lookup at that block shows the coin held. The auditor verifies the bundles and the report on their own node with `bip322-audit verify` and `bitcoin-cli`.
+* **Continuously, for yourself.** Before broadcasting a spend, prove its change address (`bip322 audit prove ADDRESS --ledger LEDGER`, sign, finalize): a valid proof means the quorum controls where the change goes. New deposit addresses the same way, or with `snapshot --skip-proven LEDGER` after the fact. A report can then be produced at any time, with every coin backed by your own signed message; a coin that arrived after its proof is marked as such (the proof shows control, not the holding).
+* **On demand, for an auditor.** After the period's end, take one full bundle (no `--skip-proven`) over every output under a message that names the audit, and produce the report for the year. Every closing coin then has a proof dated after the closing block, and the chain lookup at that block shows the coin held. The auditor verifies the bundles and the report on their own node with `bip322 audit verify` and `bitcoin-cli`.
 
-The whole flow, for the holder and for the auditor, is in the [handbook](bip322report/handbook.md); `bip322-report handbook` prints it.
+The whole flow, for the holder and for the auditor, is in the [handbook](bip322report/handbook.md); `bip322 report handbook` prints it.
 
 ## Install
 
@@ -28,7 +28,7 @@ three commands land in the venv's `bin`:
 ```sh
 python3 -m venv ~/.bip322 && ~/.bip322/bin/pip install "bip322-report[kernel,pdf]"
 export PATH="$HOME/.bip322/bin:$PATH"
-bip322 engines && bip322-audit help && bip322-report help
+bip322 engines && bip322 audit help && bip322 report help
 ```
 
 Python 3.11 or newer (on Ubuntu 22.04: `apt install python3.12 python3.12-venv`
@@ -65,18 +65,18 @@ plus the JSON and the CSV; `--pdf` then says what is missing.
 ```sh
 # a ledger: any directory where the bip322-audit bundles accumulate.
 # before broadcasting a spend: prove its change address
-bip322-audit -w treasury prove bc1q...change... --text "Proof of control {date}" --ledger ledger
+bip322 audit -w treasury prove bc1q...change... --text "Proof of control {date}" --ledger ledger
 #   sign to_sign/*.psbt on the cosigners' devices, put the results in signed/, then
-bip322-audit finalize ledger/snapshot-<date>-<height>     # valid -> broadcast
+bip322 audit finalize ledger/snapshot-<date>-<height>     # valid -> broadcast
 # anything that arrived on addresses not yet proven (deposits):
-bip322-audit -w treasury snapshot --text "Proof of control {date}" --skip-proven ledger
+bip322 audit -w treasury snapshot --text "Proof of control {date}" --skip-proven ledger
 
 # the year's statement
-bip322-report -w treasury --year 2026 --ledger ledger
+bip322 report -w treasury --year 2026 --ledger ledger
 #   -> treasury-2026/treasury-2026.json, .html, .csv (and .pdf with --pdf); -o DIR names both
 ```
 
-`bip322-report` prints a summary on stderr and the directory on stdout. For the
+`bip322 report` prints a summary on stderr and the directory on stdout. For the
 year, made in January from the year-end bundle:
 
 ```
@@ -106,13 +106,13 @@ error.
 ## Commands
 
 ```
-bip322-report [--cli CMD] [-w NAME] history [-o history.json]
-bip322-report [--cli CMD]           block WHEN
-bip322-report [--cli CMD] [-w NAME] balance [--at WHEN | --height H] [--history FILE]
-bip322-report [--cli CMD] [-w NAME] (--year Y | --from WHEN --to WHEN | --from-height H --to-height H)
+bip322 report [--cli CMD] [-w NAME] history [-o history.json]
+bip322 report [--cli CMD]           block WHEN
+bip322 report [--cli CMD] [-w NAME] balance [--at WHEN | --height H] [--history FILE]
+bip322 report [--cli CMD] [-w NAME] (--year Y | --from WHEN --to WHEN | --from-height H --to-height H)
                                      [--ledger DIR]... [--holder NAME] [--history FILE]
                                      [--rates CSV | --rate N] [--currency CODE] [--dust SATS [--dust-force]] [--explorer URL] [--pdf] [--theme journal|light|paper|dark] [--heading STYLE] [-o DIR]
-bip322-report help [COMMAND]
+bip322 report help [COMMAND]
 ```
 
 The statement is the default command (`report` names it explicitly, as in `help report`).
@@ -252,7 +252,7 @@ ones) appears as a bare count.
 **What to hand over:** the report directory. Besides the HTML, JSON and
 CSV (and the PDF), all named after the directory, it holds `ledger/` with
 a copy of each `proofs.json` the statement cites, and no other, under the
-name the report uses, so a reader can run `bip322-audit verify` on each.
+name the report uses, so a reader can run `bip322 audit verify` on each.
 Never hand over the ledger itself: the bundles' PSBT files carry the
 wallet's xpubs. `--no-proofs` skips the copy.
 

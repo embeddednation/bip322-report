@@ -118,7 +118,7 @@ and independently verifiable. There is nothing else to keep in sync.
 
 Owner-side tooling: it needs the node wallet (watch-only is enough) and reads
 the ledger. What it hands to a reader, the report and the bundles, is
-checkable on any node with the chain and no wallet: `bip322-audit verify` for
+checkable on any node with the chain and no wallet: `bip322 audit verify` for
 the bundles, `gettxout` and the transactions by txid for the balances and
 movements. The statement's notes name the files that come with it and the
 command that checks a proofs file; the commands on the UTXO pages paste as
