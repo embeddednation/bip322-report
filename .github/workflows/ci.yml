@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: bip322-core at the pinned tag
+        uses: actions/checkout@v5
+        with:
+          repository: embeddednation/bip322-core
+          ref: v0.11.1
+          path: bip322-core
+      - name: bip322-audit at the pinned tag
+        uses: actions/checkout@v5
+        with:
+          repository: embeddednation/bip322-audit
+          ref: v0.12.1
+          path: bip322-audit
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: setup (venv, hash-pinned dependencies, core and audit from the checkouts, editable install)
+        run: ./setup.sh --core ./bip322-core --audit ./bip322-audit --no-tests
+      - name: lint
+        run: .venv/bin/ruff check bip322report tests
+      - name: tests (the regtest test skips without a Bitcoin Core binary)
+        run: .venv/bin/python -m pytest -q

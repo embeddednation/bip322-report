@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ r.label }} · {{ r.period.label }}</title>
+<style>
+  {% for f in faces %}
+  @font-face { font-family: "{{ f.family }}"; src: url("{{ f.url }}") format("woff2"); font-weight: {{ f.weight }}; font-style: {{ f.style }}; }
+  {% endfor %}
+  /* colours and typefaces come from the theme (render.Theme) */
+  :root { --bg: {{ t.bg }}; --ink: {{ t.ink }}; --strong: {{ t.strong }}; --muted: {{ t.muted }}; --rule: {{ t.rule }}; --rule-strong: {{ t.rule_strong }};
+    --head: {{ t.head }}; --zebra: {{ t.zebra }}; --accent: {{ t.accent }}; --ok: {{ t.ok }}; --bad: {{ t.bad }}; --on-pill: {{ t.on_pill }}; --term-ink: {{ t.term_ink }};
+    --font-body: {{ t.font_body | safe }}; --font-heading: {{ t.font_heading | safe }}; --font-label: {{ t.font_label | safe }}; --font-mono: {{ t.font_mono | safe }};
+    --c-script: {{ t.script }}; --c-block: {{ t.block }}; --c-proof: {{ t.proof }}; --c-utxo: {{ t.utxo }}; --c-amount: {{ t.amount }}; --c-good: {{ t.good }}; --c-bad: {{ t.bad_text }}; }
+
+  /* the printed page: its margins, and the running lines at its head and foot */
+  @page {
+    size: A4; margin: 22mm 16mm 20mm 16mm; background: {{ t.bg }};
+    @top-left { content: "Statement of bitcoin holdings and movements"; font: 7.5pt {{ t.font_label | safe }}; color: {{ t.muted }}; }
+    @top-right { content: string(doc-title); font: 7.5pt {{ t.font_label | safe }}; color: {{ t.muted }}; }
+    @bottom-left { content: "Reference " string(ref) " · generated " string(generated); font: 7.5pt {{ t.font_label | safe }}; color: {{ t.muted }}; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 7.5pt {{ t.font_label | safe }}; color: {{ t.muted }}; }
+  }
+  span.meta { string-set: generated attr(data-generated), ref attr(data-ref); }
+  .page { break-before: page; }
+  .keep { break-inside: avoid; }
+
+  /* text */
+  html { font: 9.5pt/1.45 var(--font-body); color: var(--ink); background: var(--bg); }
+  body { margin: 0; }
+  h1, h2, h3 { font-family: var(--font-heading); }
+  .eyebrow, table, .badge, .pill, .small { font-family: var(--font-label); }
+  {% if t.oldstyle %}p { font-variant-numeric: oldstyle-nums; }{% endif %}
+  p { margin: 4px 0 8px; }
+  strong { color: var(--strong); }
+  a { color: inherit; text-decoration: none; }
+  .muted { color: var(--muted); }
+  .small { font-size: 8pt; }
+  .mono, code { font-family: var(--font-mono); font-size: 7.5pt; overflow-wrap: anywhere; word-break: break-all; }
+  .ok { color: var(--ok); font-weight: 700; } .bad { color: var(--bad); font-weight: 700; }
+  .runin p { margin: 0 0 6px; }
+
+  /* headings; a section's is set in the theme's style (render.HEADINGS) */
+  h1 { font-size: 14pt; line-height: 1.2; margin: 0; letter-spacing: -0.01em; overflow-wrap: anywhere; color: var(--strong); string-set: doc-title content(); }
+  h2 { font-size: 12pt; color: var(--accent); margin: 24px 0 8px; padding-bottom: 4px; border-bottom: 2px solid var(--accent); break-after: avoid; }
+  {% set red = t.tab or t.bad %}
+  {% if t.heading == "tab" %}
+  h2 { color: var(--strong); border-bottom: 0; border-top: 1px solid var(--rule); padding: 0; }
+  h2::before { content: ""; display: block; width: 36px; height: 4px; background: {{ red }}; margin: -1px 0 8px; }
+  {% elif t.heading == "number" %}
+  h2 { color: var(--strong); border-bottom: 0; padding-bottom: 0; }
+  h2 .n { color: {{ red }}; }
+  {% elif t.heading == "redrule" %}
+  h2 { color: var(--strong); border-bottom: 1px solid {{ red }}; }
+  {% endif %}
+  h2.attention { color: var(--bad); border-color: var(--bad); }
+  .page h2 { font-size: 11pt; overflow-wrap: anywhere; word-break: break-all; }
+  .page h2 .mono { font: inherit; }
+  h3 { font-size: 10pt; margin: 14px 0 4px; color: var(--strong); break-after: avoid; }
+  h3.notes { margin-top: 30px; }
+
+  /* the statement's head: title, result, period */
+  .head { display: table; width: 100%; margin-bottom: 8px; }
+  .head > div { display: table-cell; vertical-align: top; }
+  .head .result { text-align: right; width: 26%; }
+  .eyebrow { font-size: 8pt; letter-spacing: 0.12em; text-transform: uppercase; color: {{ t.tab or "var(--muted)" }}; margin: 0 0 6px; font-weight: 600; }
+  .pill { display: inline-block; padding: 3px 12px; border-radius: 999px; font-weight: 700; font-size: 9.5pt; }
+  .pill.bad { background: var(--bad); color: var(--on-pill); }
+  .period { font-family: var(--font-label); font-size: 9.5pt; color: var(--muted); margin: 2px 0 18px; }
+  .period .when { color: var(--strong); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* tables */
+  table { border-collapse: collapse; width: 100%; margin: 4px 0 10px; font-size: 8.8pt; table-layout: fixed; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--rule); vertical-align: top; overflow-wrap: anywhere; }
+  th { background: var(--head); color: var(--strong); font-weight: 600; font-size: 8pt; letter-spacing: 0.03em; border-bottom: 1.5px solid var(--rule-strong); }
+  tbody tr:nth-child(even) td { background: var(--zebra); }
+  tr { break-inside: avoid; }
+  tr.open td { font-weight: 700; color: var(--strong); }
+  tr.total td { font-weight: 700; color: var(--strong); background: var(--bg); border-top: 1px solid var(--rule-strong); border-bottom: 3px double var(--rule-strong); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  col.w-date { width: 13%; } col.w-kind { width: 9%; } col.w-num { width: 13%; } col.w-btc { width: 13%; }
+  .kv td:first-child { width: 30%; color: var(--muted); }
+  .checks td:first-child { width: 4%; font-weight: 700; text-align: center; }
+
+  /* a UTXO's page: tables of a name and its value, without stripes */
+  table.coins tbody { break-inside: avoid; }
+  table.coins tbody tr td { background: var(--bg); border-bottom: 0; }
+  table.coins tbody tr.last td { border-bottom: 1px solid var(--rule); }
+  table.coins tr.lead td { padding-top: 10px; border-top: 1px solid var(--rule); }
+  table.coins tbody:first-of-type tr.lead td { border-top: 0; }
+  table.coins td.addr { font-size: 9pt; } table.coins td.addr .mono { font-size: 8.5pt; }
+  .page table.coins td.addr, .page table.coins td.addr .mono { font-size: 7.5pt; }
+  table.coins td.k { color: var(--muted); font-size: 8pt; padding-top: 6px; overflow-wrap: normal; }
+  code.msg, .sig { white-space: pre-wrap; display: block; line-height: 1.35; }
+  .badge { display: inline-block; padding: 0 6px; border-radius: 3px; font-size: 7.5pt; font-weight: 600; border: 1px solid; line-height: 1.5; background: var(--bg); }
+  .badge.bad { color: var(--bad); border-color: var(--bad); }
+
+  /* commands and their output, and the values a reader matches in them: one thing, one colour */
+  pre { margin: 0; font-family: var(--font-mono); font-size: 7.5pt; line-height: 1.35; white-space: pre; overflow-x: hidden; }
+  pre.out { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
+  .term { color: var(--term-ink); padding: 3px 0 2px; margin: 0 0 2px; }
+  .hl-script { color: var(--c-script); } .hl-utxo { color: var(--c-utxo); } .hl-block { color: var(--c-block); }
+  .hl-proof { color: var(--c-proof); } .hl-amount { color: var(--c-amount); }
+  .hl-ok { color: var(--c-good); font-weight: 700; } .hl-bad { color: var(--c-bad); font-weight: 700; }
+  .hl-hash { color: {{ t.hash }}; } .hl-txid { color: {{ t.txid }}; }
+
+  /* the figure of section 4 */
+  svg.fig { width: 100%; height: auto; margin: 6px 0 2px; }
+  .caption { font-size: 8pt; color: var(--muted); margin: 0 0 10px; }
+</style>
+</head>
+<body>
+{% macro tx(t, role="") -%}
+  {% if explorer %}<a class="mono {{ role }}" href="{{ explorer }}/tx/{{ t }}?showDetails=true">{{ t }}</a>{% else %}<span class="mono {{ role }}">{{ t }}</span>{% endif %}
+{%- endmacro %}
+{% macro spk(hex, t, role="") -%}
+  {% if explorer and hex %}<a class="mono {{ role }}" href="{{ explorer }}/tx/{{ t }}?showDetails=true">{{ hex }}</a>{% else %}<span class="mono {{ role }}">{{ hex or "?" }}</span>{% endif %}
+{%- endmacro %}
+{% macro yesno(v) -%}{% if v %}<span class="ok">✓</span>{% else %}<span class="bad">✗</span>{% endif %}{%- endmacro %}
+<span class="meta" data-generated="{{ r.generated_utc }}" data-ref="{{ r.report_id }}"></span>
+
+<div class="head">
+  <div>
+    <p class="eyebrow">Statement of bitcoin holdings and movements</p>
+    <h1>{{ r.label }} · {{ r.period.label }}</h1>
+  </div>
+  <div class="result">{% if not r.ok %}<span class="pill bad">ATTENTION</span>{% endif %}</div>
+</div>
+<p class="period">{% if r.holder %}{{ r.holder }} · {% endif %}<span class="when">{{ r.period.start.time_utc | utc }}</span> – <span class="when">{{ r.period.end.time_utc | utc }}</span>{% if r.chain != "main" %} · {{ r.chain }} chain{% endif %}</p>
+
+{% if not r.ok %}
+<h2 class="attention">Attention</h2>
+<p class="small">Not every check passed; the failing ones are marked below, and the section concerned says more.</p>
+<table class="kv">
+  <colgroup><col style="width:56%"><col></colgroup>
+  <tbody>
+  <tr><td>Opening balance, {{ r.period.start.time_utc | utc }}</td><td class="num">{{ r.opening.total_btc }}</td></tr>
+  <tr><td>Net of the {{ r.totals.transactions }} transactions in the period (section 1)</td><td class="num">{{ r.totals.net_btc | acct }}</td></tr>
+  <tr><td>Closing balance, {{ r.period.end.time_utc | utc }} (section 2)</td><td class="num">{{ r.closing.total_btc }}</td></tr>
+  <tr class="total"><td>Difference</td><td class="num">{% if r.reconciliation.ok %}<span class="ok">{{ r.reconciliation.diff_sat | btc }}</span>{% else %}<span class="bad">{{ r.reconciliation.diff_sat | btc | acct }}</span>{% endif %}</td></tr>
+  </tbody>
+</table>
+<table class="checks">
+  <colgroup><col><col style="width:56%"><col></colgroup>
+  <tr><td>{{ yesno(r.coverage.complete) }}</td><td>Proof of control for every closing UTXO (section 3)</td>
+      <td class="num">{{ r.coverage.addresses_covered }} of {{ r.coverage.addresses_total }} scripts{% if not r.coverage.complete %} · {{ r.coverage.uncovered_btc }} without proof{% endif %}</td></tr>
+  <tr><td>{% if r.period.to_tip or r.coverage.covered_after_period_count != r.coverage.total_count %}<span class="muted">–</span>{% else %}{{ yesno(true) }}{% endif %}</td>
+      <td>Proofs dated after the period's end</td>
+      <td class="num">{% if r.period.to_tip %}n/a, the period runs to the tip{% else %}{{ r.coverage.addresses_after_period }} of {{ r.coverage.addresses_total }} scripts{% endif %}</td></tr>
+  {% if r.onchain %}
+  <tr><td>{% if r.onchain.contradicted %}{{ yesno(false) }}{% elif r.onchain.not_run or r.onchain.spent_since or r.onchain.after_proof %}<span class="muted">–</span>{% else %}{{ yesno(true) }}{% endif %}</td>
+      <td>Closing UTXOs found on the chain at the block of their proof (section 3)</td>
+      <td class="num">{{ r.onchain.matches }} of {{ r.onchain.outputs }}{% if r.onchain.after_proof %} · {{ r.onchain.after_proof }} received after the proof{% endif %}{% if r.onchain.spent_since %} · {{ r.onchain.spent_since }} spent since{% endif %}{% if r.onchain.contradicted %} · {{ r.onchain.contradicted }} contradicted{% endif %}{% if r.onchain.not_run %} · {{ r.onchain.not_run }} not run{% endif %}</td></tr>
+  {% endif %}
+  {% if r.node_check %}
+  <tr><td>{% if r.node_check.ok is none %}<span class="muted">–</span>{% else %}{{ yesno(r.node_check.ok) }}{% endif %}</td><td>Node wallet agrees with the closing UTXOs</td>
+      <td class="num">{% if r.node_check.ok is none %}not run · {{ r.node_check.reason }}{% else %}{{ r.node_check.listunspent_count }} of {{ r.node_check.closing_count }}{% if r.node_check.spent_in_mempool %} · {{ r.node_check.spent_in_mempool | length }} spent by an unconfirmed transaction{% endif %}{% if r.node_check.immature %} · {{ r.node_check.immature | length }} immature coinbase{% endif %}{% endif %}</td></tr>
+  {% endif %}
+</table>
+{% endif %}
+
+<div class="keep">
+<h2><span class="n">1.</span> Movements in the period</h2>
+{% if r.transactions %}
+<table>
+  <colgroup><col class="w-date"><col><col class="w-kind"><col class="w-num"><col class="w-num"><col class="w-num">{% if r.fiat %}<col class="w-num">{% endif %}</colgroup>
+  <thead><tr><th>Date (UTC)</th><th>Transaction</th><th>Kind</th><th class="num">Amount</th><th class="num">Fee</th><th class="num">Balance</th>{% if r.fiat %}<th class="num">Amount {{ r.fiat.currency }}</th>{% endif %}</tr></thead>
+  <tbody>
+  <tr class="open"><td colspan="5">Opening balance, {{ r.period.start.time_utc | utc }}</td><td class="num">{{ r.opening.total_btc }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
+  {% for t in r.transactions %}
+  <tr><td>{{ t.time_utc[:10] }}<br><span class="muted">{{ t.time_utc[11:19] }}</span></td>
+      <td>{{ tx(t.txid) }}</td>
+      <td>{{ "dust swept" if t.kind == "swept" else t.kind }}</td><td class="num">{% if t.amount_sat %}{{ t.amount_btc | acct }}{% endif %}</td><td class="num">{% if t.kind == "mixed" %}<span class="muted">unknown</span>{% elif t.fee_btc %}({{ t.fee_btc }}){% endif %}</td><td class="num">{{ t.balance_after_btc }}</td>
+    {% if r.fiat %}<td class="num">{{ (t.fiat.amount | acct) if t.fiat.amount and t.amount_sat else "" }}</td>{% endif %}</tr>
+  {% endfor %}
+  <tr class="total"><td colspan="3">Closing balance, {{ r.period.end.time_utc | utc }} · the holdings of section 2</td><td class="num">{{ r.totals.amount_btc | acct }}</td><td class="num">({{ r.totals.fees_btc }})</td><td class="num">{{ r.closing.total_btc }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
+  {% if not r.reconciliation.ok %}
+  <tr><td colspan="5" class="bad">Difference between the running balance and the holdings on the chain</td><td class="num bad">{{ r.reconciliation.diff_sat | btc | acct }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
+  {% endif %}
+  </tbody>
+</table>
+<p class="small muted">Received {{ r.totals.received_btc }} · paid out {{ r.totals.sent_btc }} · fees {{ r.totals.fees_btc }}{% if r.totals.mixed_count %} · mixed {{ r.totals.mixed_btc | acct }}, fee unknown{% endif %}{% if r.reconciliation.ok %} · difference to the holdings on the chain {{ r.reconciliation.diff_sat | btc }}{% endif %}.{% if r.fiat %} {{ r.fiat.currency }} at the rate in force on the transaction's day.{% endif %}</p>
+{% else %}<p class="small muted">No transactions in the period: the closing balance, {{ r.closing.total_btc }}, equals the opening balance{% if not r.reconciliation.ok %} <span class="bad">but the holdings on the chain differ by {{ r.reconciliation.diff_sat | btc | acct }}</span>{% endif %}.</p>{% endif %}
+</div>
+
+<div class="keep">
+<h2><span class="n">2.</span> Holdings at the end of the period · {{ r.period.end.time_utc | utc }}</h2>
+<table>
+  <colgroup><col style="width:44%"><col><col class="w-btc"></colgroup>
+  <thead><tr><th>UTXO</th><th>Locked to (scriptPubKey)</th><th class="num">Amount</th></tr></thead>
+  <tbody>
+  {% for a in r.closing.addresses %}{% for o in a.outputs %}
+  <tr><td><span class="mono hl-utxo">{{ tx(o.txid, "hl-utxo") }}:{{ o.vout }}</span></td>
+      <td>{{ spk(a.script.script_pubkey, o.txid, "hl-script") }}</td>
+      <td class="num hl-amount">{{ o.amount_btc }}</td></tr>
+  {% endfor %}{% endfor %}
+  <tr class="total"><td colspan="2">Closing balance</td><td class="num">{{ r.closing.total_btc }}</td></tr>
+  </tbody>
+</table>
+{% if r.closing.coins %}<p class="small muted">One page per UTXO follows: the proof of control of its scriptPubKey, then the chain's record of the UTXO at the block of the proof.</p>{% elif r.dust.count %}<p class="small muted">Nothing but dust at the end of the period (see the notes): nothing to prove.</p>{% else %}<p class="small muted">No holdings at the end of the period: nothing to prove.</p>{% endif %}
+{% if r.coverage.uncovered %}
+<p class="bad">UTXOs without a verified proof hold {{ r.coverage.uncovered_btc }}.</p>
+{% endif %}
+{% if r.pending_bundles %}
+<p class="small muted">Proofs awaiting signatures: {% for p in r.pending_bundles %}<code>{{ p }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+{% endif %}
+{% if r.pending_transactions %}
+<p class="small muted">Unconfirmed transactions, in no balance: {% for t in r.pending_transactions %}{{ tx(t.txid) }} ({{ t.kind }}, {{ t.net_btc | acct }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>
+{% endif %}
+</div>
+
+{% set n = namespace(i=0) %}
+{% for a in r.closing.addresses %}{% for o in a.outputs %}{% set n.i = n.i + 1 %}
+<div class="page">
+<h2><span class="n">3.{{ n.i }}</span> UTXO {{ tx(o.txid) }}:{{ o.vout }}</h2>
+<h3>Proof of control of the scriptPubKey</h3>
+<table class="coins">
+  <colgroup><col style="width:14%"><col></colgroup>
+  <tbody>
+  <tr class="lead"><td class="k">scriptPubKey</td><td class="addr">{{ spk(a.script.script_pubkey, o.txid, "hl-script") }}</td></tr>
+  {% if a.proof %}
+  {% set stamp = a.proof.stamp.height ~ " " ~ a.proof.stamp.hash %}
+  <tr><td class="k">message</td><td><code class="msg">{{ a.proof.message | hl([["block", stamp, "block: "]]) }}</code></td></tr>
+  <tr><td class="k">proof</td><td><span class="mono sig hl-proof">{{ a.proof.signature | breakable }}</span></td></tr>
+  <tr class="last"><td class="k">verify</td><td>
+    <div class="term"><pre class="cmd">{{ a.proof.command | hl([["script", a.script.script_pubkey], ["proof", a.proof.signature], ["block", stamp, "block: "]]) }}</pre>
+    <pre class="out">{{ a.proof.output | hl([["bad", "INVALID"], ["bad", "INCONCLUSIVE"], ["ok", "VALID"]]) }}</pre></div>
+    {% if not a.proof.verified %}<span class="badge bad">{{ a.proof.state | upper }}</span> <span class="small muted">the proof does not verify; see the output above</span>{% endif %}
+    {% if a.proof.before_coins == "all" %}<span class="small muted">The proof predates this UTXO: it shows control of the script, and the lookup below says when the UTXO arrived.</span>{% elif a.proof.before_coins == "some" %}<span class="small muted">The proof predates some of the UTXOs at this script.</span>{% endif %}
+  </td></tr>
+  {% else %}
+  <tr class="last"><td class="k">verify</td><td><span class="badge bad">NO PROOF</span></td></tr>
+  {% endif %}
+  </tbody>
+</table>
+<h3>On the chain</h3>
+<table class="coins">
+  <colgroup><col style="width:14%"><col></colgroup>
+  <tbody>
+  <tr class="lead"><td class="k">utxo</td><td class="addr"><span class="mono hl-utxo">{{ tx(o.txid, "hl-utxo") }}:{{ o.vout }}</span></td></tr>
+  <tr class="last"><td class="k">lookup</td><td>
+    {% if o.onchain %}
+    {% set at = o.onchain.at | string %}
+    <div class="term"><pre class="cmd">{{ o.onchain.command | hl([["utxo", o.txid ~ ":" ~ o.vout], ["block", at, "--at "]]) }}</pre>
+    <pre class="out">{{ o.onchain.output | hl([["script", a.script.script_pubkey, "locked to  "], ["amount", o.amount_btc ~ " BTC"], ["block", at, "block "]]) }}</pre></div>
+    {% if o.onchain.status == "after_proof" %}<span class="badge">AFTER THE PROOF</span> <span class="small muted">received after block {{ o.onchain.at }}, so this proof predates the UTXO; a proof dated later, for example the year-end one, closes that</span>
+    {% elif o.onchain.status == "spent_since" %}<span class="badge">SPENT SINCE</span> <span class="small muted">{% if o.spent_by %}spent after the period, at block {{ o.spent_by.height }}, by {{ tx(o.spent_by.txid) }}{% else %}not in the UTXO set any more; spent after the history for this statement was read{% endif %}</span>
+    {% elif o.onchain.status == "contradicted" %}<span class="badge bad">CONTRADICTED</span> <span class="small muted">the chain disagrees with the statement</span>
+    {% elif o.onchain.status != "matches" %}<span class="badge">NOT RUN</span> <span class="small muted">the lookup failed when this statement was prepared; see the output above</span>{% endif %}
+    {% else %}
+    <div class="term"><pre class="cmd">bip322 audit holdings \
+{{ o.txid }}:{{ o.vout }} --at {{ o.proof.stamp.height if o.proof else r.period.end.height }}</pre></div><span class="badge">NOT RUN</span> <span class="small muted">not run when this statement was prepared</span>
+    {% endif %}
+  </td></tr>
+  </tbody>
+</table>
+</div>
+{% endfor %}{% endfor %}
+
+<div class="{% if r.closing.coins %}page{% endif %}">
+{% if r.closing.coins %}
+<h2><span class="n">4.</span> How a proof of control works</h2>
+{% set m = t.muted %}{% set k = t.ink %}{% set st = t.strong %}{% set ln = t.rule_strong %}{% set mono = t.font_mono %}{# the stacks are escaped in attributes: their quotes would end one #}
+{# the figure's grid, in the units of its viewBox: three columns of boxes (the left edge of each) and two rows (their top);
+   the lines of text inside a box, and what sits between the boxes, are placed by hand from these #}
+{% set left = 1 %}{% set mid = 191 %}{% set right = 454 %}{% set top = 50 %}{% set low = 270 %}
+{% set narrow = 166 %}{% set wide = 246 %}{# the width of a box in the left column, and in the other two #}
+{% set pad = 10 %}{% set indent = 55 %}{% set step = 22 %}{# from a box's edge: its text, a field's name, a numbered step's second line #}
+{% set value_dx = 81 %}{# from a field's name to its value: 15 characters of the 9px mono, the longest name ("scriptSig OP_0") and a space #}
+{% macro val(x, y, text, role) -%}
+<text x="{{ x }}" y="{{ y }}" font-family="{{ mono }}" font-size="9" font-weight="700" fill="{{ t[role] }}">{{ text }}</text>
+{%- endmacro %}
+{% macro pill(x, y, w, text, size=8.5) -%}
+<rect x="{{ x }}" y="{{ y }}" width="{{ w }}" height="18" rx="9" fill="none" stroke="{{ m }}"/><text x="{{ x + w / 2 }}" y="{{ y + 12.5 }}" text-anchor="middle" font-size="{{ size }}" fill="{{ m }}">{{ text }}</text>
+{%- endmacro %}
+{% macro field(x, y, name, text, role=None) -%}
+<text x="{{ x }}" y="{{ y }}" font-family="{{ mono }}" font-size="9" fill="{{ k }}">{{ name }}</text>{% if role %}{{ val(x + value_dx, y, text, role) }}{% else %}<text x="{{ x + value_dx }}" y="{{ y }}" font-family="{{ mono }}" font-size="9" fill="{{ k }}">{{ text }}</text>{% endif %}
+{%- endmacro %}
+{% macro txbox(x, y, h, title, sub) -%}
+<rect x="{{ x }}" y="{{ y }}" width="{{ wide }}" height="{{ h }}" rx="3" fill="none" stroke="{{ ln }}"/>
+<text x="{{ x + pad }}" y="{{ y + 18 }}" font-weight="700" fill="{{ st }}">{{ title }} <tspan font-weight="400" fill="{{ m }}">{{ sub }}</tspan></text>
+<text x="{{ x + pad }}" y="{{ y + 40 }}" font-weight="600" fill="{{ k }}">input</text>
+<text x="{{ x + pad }}" y="{{ y + 110 }}" font-weight="600" fill="{{ k }}">output</text>
+{%- endmacro %}
+<svg class="fig" viewBox="0 49 701 465" xmlns="http://www.w3.org/2000/svg" font-family="{{ t.font_label }}" font-size="10">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="{{ m }}"/></marker>
+    <marker id="arrp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="{{ t.proof }}"/></marker>
+    <marker id="arrh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="{{ t.hash }}"/></marker>
+  </defs>
+  <!-- the message, hashed into to_spend's scriptSig -->
+  <rect x="{{ left }}" y="{{ top }}" width="{{ narrow }}" height="78" rx="3" fill="none" stroke="{{ ln }}"/>
+  <text x="{{ left + pad }}" y="68" font-weight="700" fill="{{ st }}">Message</text>
+  <text x="{{ left + pad }}" y="86" font-family="{{ mono }}" font-size="9" fill="{{ k }}">{{ fig.title }}</text>
+  <text x="{{ left + pad }}" y="100" font-family="{{ mono }}" font-size="9" fill="{{ k }}">block:</text>
+  <text x="49" y="100" font-family="{{ mono }}" font-size="9" fill="{{ t.block }}">{{ fig.block }}</text>
+  <text x="{{ left + pad }}" y="118" fill="{{ m }}">the block line dates the proof</text>
+  <line x1="84" y1="129" x2="84" y2="140" stroke="{{ m }}" marker-end="url(#arr)"/>
+  {{ pill(34, 142, 100, "SHA-256, tagged") }}
+  {{ val(38, 180, "<hash of message>", "hash") }}
+  <path d="M134,176 H178 V118 H189" fill="none" stroke="{{ t.hash }}" marker-end="url(#arrh)"/>
+  <!-- the three transactions, in one form: input, output -->
+  {{ txbox(mid, top, 156, "to_spend", "a transaction never broadcast") }}
+  {{ field(mid + indent, 90, "prevout", "0000…00:ffffffff") }}
+  <text x="{{ mid + indent }}" y="104" fill="{{ m }}">the null outpoint: no such coin</text>
+  {{ field(mid + indent, 118, "scriptSig OP_0", "<hash of message>", "hash") }}
+  <text x="{{ mid + pad }}" y="138" fill="{{ m }}">the message, committed to the transaction</text>
+  {{ field(mid + indent, 160, "value", "0 sat") }}
+  {{ field(mid + indent, 174, "scriptPubKey", "<scriptPubKey>", "script") }}
+  <text x="{{ mid + pad }}" y="194" fill="{{ m }}">the lock being proven, with nothing in it</text>
+
+  {{ txbox(right, top, 156, "On the chain", "a real transaction, confirmed") }}
+  {{ field(right + indent, 90, "prevout", "<the payer's coin>") }}
+  <text x="{{ right + indent }}" y="104" fill="{{ m }}">whoever paid the wallet</text>
+  {{ field(right + indent, 118, "witness", "<a signature>") }}
+  <text x="{{ right + pad }}" y="138" fill="{{ m }}">a payment to the wallet</text>
+  {{ field(right + indent, 160, "value", "<locked amount>", "amount") }}
+  {{ field(right + indent, 174, "scriptPubKey", "<scriptPubKey>", "script") }}
+  <text x="{{ right + pad }}" y="194" fill="{{ m }}">the same lock, with coins in it</text>
+
+  <!-- each transaction's id, and what consumes it -->
+  <line x1="314" y1="207" x2="314" y2="216" stroke="{{ m }}"/>
+  {{ pill(221, 218, 186, "SHA-256 twice, over the raw transaction") }}
+  {{ val(265, 254, "<txid of to_spend>", "txid") }}
+  <line x1="314" y1="259" x2="314" y2="268" stroke="{{ m }}" marker-end="url(#arr)"/>
+  <line x1="577" y1="207" x2="577" y2="216" stroke="{{ m }}"/>
+  {{ pill(484, 218, 186, "SHA-256 twice, over the raw transaction") }}
+  <text x="487" y="254" fill="{{ m }}" font-size="8.5">the UTXO</text>
+  {{ val(541, 254, "<txid>:<vout>", "utxo") }}
+  <line x1="577" y1="259" x2="577" y2="268" stroke="{{ m }}" marker-end="url(#arr)"/>
+
+  {{ txbox(mid, low, 240, "to_sign", "a transaction never broadcast") }}
+  {{ field(mid + indent, 310, "prevout", "<txid of to_spend>", "txid") }}
+  <text x="{{ mid + indent }}" y="324" fill="{{ m }}">output 0 of to_spend, the empty one</text>
+  {{ field(mid + indent, 338, "witness", "<the proof>", "proof") }}
+  <text x="{{ mid + pad }}" y="358" fill="{{ m }}">what unlocks the scriptPubKey</text>
+  {{ field(mid + indent, 380, "value", "0 sat") }}
+  {{ field(mid + indent, 394, "scriptPubKey", "OP_RETURN") }}
+  <text x="{{ mid + pad }}" y="414" fill="{{ m }}">nothing can spend it</text>
+  <text x="{{ mid + pad }}" y="438" fill="{{ m }}">every signature in the witness commits to</text>
+  <text x="{{ mid + pad }}" y="452" fill="{{ m }}">the txid above, and so to the message</text>
+
+  <!-- the proof, into to_sign's witness -->
+  <rect x="{{ left }}" y="292" width="{{ narrow }}" height="86" rx="3" fill="none" stroke="{{ ln }}"/>
+  <text x="{{ left + pad }}" y="310" font-weight="700" fill="{{ st }}">The proof</text>
+  <text x="{{ left + pad }}" y="328" fill="{{ k }}">to_sign's witness, base64-</text>
+  <text x="{{ left + pad }}" y="342" fill="{{ k }}">encoded with the prefix smp:</text>
+  <text x="{{ left + pad }}" y="360" font-family="{{ mono }}" font-size="9" fill="{{ t.proof }}" font-weight="700">smpBABHMEQCI…</text>
+  <line x1="168" y1="334" x2="189" y2="334" stroke="{{ t.proof }}" marker-end="url(#arrp)"/>
+
+  <!-- the verifier: to_sign in, the UTXO in -->
+  <rect x="{{ right }}" y="{{ low }}" width="{{ wide }}" height="240" rx="3" fill="none" stroke="{{ ln }}"/>
+  <line x1="439" y1="370" x2="452" y2="370" stroke="{{ m }}" marker-end="url(#arr)"/>
+  <text x="{{ right + pad }}" y="288" font-weight="700" fill="{{ st }}">Verifier</text>
+  <text x="{{ right + pad }}" y="308" fill="{{ k }}">1  rebuilds to_spend from</text>
+  {{ val(right + step, 321, "<hash of message>", "hash") }}
+  <text x="{{ right + step }}" y="334" fill="{{ k }}">and</text>
+  {{ val(498, 334, "<scriptPubKey>", "script") }}
+  <text x="{{ right + pad }}" y="354" fill="{{ k }}">2  rebuilds to_sign from</text>
+  {{ val(right + step, 367, "<txid of to_spend>", "txid") }}
+  <text x="{{ right + step }}" y="380" fill="{{ k }}">and</text>
+  {{ val(498, 380, "<the proof>", "proof") }}
+  <text x="{{ right + pad }}" y="400" fill="{{ k }}">3  checks, as a node would for any spend,</text>
+  <text x="{{ right + step }}" y="413" fill="{{ k }}">that</text>
+  {{ val(500, 413, "<the proof>", "proof") }}
+  <text x="566" y="413" fill="{{ k }}">unlocks</text>
+  {{ val(right + step, 426, "<scriptPubKey>", "script") }}
+  <text x="{{ right + pad }}" y="446" fill="{{ k }}">4  finds the UTXO on the chain:</text>
+  {{ val(right + step, 459, "<txid>:<vout>", "utxo") }}
+  <text x="553" y="459" fill="{{ k }}">unspent, holding</text>
+  {{ val(right + step, 472, "<locked amount>", "amount") }}
+  <text x="564" y="472" fill="{{ k }}">behind</text>
+  {{ val(right + step, 485, "<scriptPubKey>", "script") }}
+  <text x="{{ right + pad }}" y="503" fill="{{ m }}">1–3: the verify command; 4: the lookup</text>
+</svg>
+<p class="caption">A proof of control is a spend that can never happen: a made-up transaction locks nothing to the real UTXO's scriptPubKey, a second one spends it with exactly what a real spend would need, and that unlocking data is the proof. The mechanism is the same for every kind of scriptPubKey.</p>
+<div class="small runin">
+  {% set S = '<span class="hl-script">scriptPubKey</span>' %}
+  {% set H = '<span class="hl-hash">hash of the message</span>' %}
+  {% set X = '<span class="hl-txid">txid of to_spend</span>' %}
+  {% set P = '<span class="hl-proof">proof</span>' %}
+  {% set U = '<span class="hl-utxo">UTXO</span>' %}
+  {% set B = '<span class="hl-block">block</span>' %}
+  <p><strong>Coins and locks.</strong> A balance is a set of unspent transaction outputs, {{ U | safe }}s. Each was created by a transaction paying an amount to a {{ S | safe }}, the lock a later transaction must open to spend it, and is named by that transaction's id and the output's index. Whoever can open the lock controls every {{ U | safe }} behind it, so control is a property of the {{ S | safe }}, and that is what a proof is about. Locks come in several kinds, a single key, a script, a taproot output; the proof works the same way for all of them.</p>
+  <p><strong>The message.</strong> The text on each {{ U | safe }} page: a title, and a line naming a {{ B | safe }} by height, hash and time. A block's hash cannot be known before the block exists, so the proof is no older than that {{ B | safe }}. The message is hashed (SHA-256 under the tag <code>BIP0322-signed-message</code>), and the {{ H | safe }} is what enters the transactions.</p>
+  <p><strong>Two transactions that never reach the network.</strong> <em>to_spend</em> has an output with the same {{ S | safe }} as the real {{ U | safe }} and nothing in it, and an input that spends no coin at all, the null outpoint, carrying the {{ H | safe }}. <em>to_sign</em> spends that empty output, naming it by the {{ X | safe }}, and pays nothing to <code>OP_RETURN</code>, which no one can spend. Neither can ever be confirmed, since the coin they pass along does not exist: a proof cannot move funds.</p>
+  <p><strong>The {{ P | safe }}.</strong> to_sign's input must be unlocked like any spend from that {{ S | safe }}, so the signers produce its witness, exactly what a real spend would carry; every signature in it commits to the {{ X | safe }}, and through it to the message. That witness, base64-encoded with the prefix <code>smp</code> (BIP-322's simple format), is the {{ P | safe }}. Nothing else needs to be kept: the verifier rebuilds both transactions from the message and the {{ S | safe }}.</p>
+  <p><strong>Verification.</strong> The verifier rebuilds to_spend from the {{ H | safe }} and the {{ S | safe }}, rebuilds to_sign from the {{ X | safe }} with the {{ P | safe }} as its witness, and checks that input exactly as a node validating a block would: the {{ P | safe }} must unlock the {{ S | safe }} under the rules that govern every spend, whatever kind of lock it is. That is the <em>verify</em> command on each {{ U | safe }} page. The <em>lookup</em> beside it finds the {{ U | safe }} in the chain's set of unspent outputs, with its amount and the same {{ S | safe }}. The engines named in each output make the check independently; one of them is Bitcoin Core's own consensus library.</p>
+  <p><strong>What it shows.</strong> That at the {{ B | safe }} named in the message the holder could produce a valid spend from the {{ S | safe }}, which is what controlling the {{ U | safe }}s locked to it means; a {{ U | safe }} confirmed after that {{ B | safe }} is covered by a later {{ P | safe }}. Control, not title: not who owns the coins, nor what liabilities stand against them. Nothing about any time after the {{ B | safe }}; a new {{ P | safe }} over a new {{ B | safe }} does.</p>
+</div>
+
+{% endif %}
+<h3 class="notes">Notes</h3>
+<div class="small runin muted">
+  <p>Amounts in BTC to eight decimals, negatives in parentheses{% if r.fiat %}; {{ r.fiat.currency }} from {{ r.fiat.source }} at the rate on each transaction's day{% endif %}. Amount is what moved between the wallet and others, received or (sent), before the fee; the balance moves by the amount and the fee together.{% if r.totals.mixed_count %} A mixed transaction has inputs from others beside the wallet's: its fee is unknown and its amount is the wallet's net.{% endif %}{% if r.dust.count %} Outputs of at most {{ r.dust.threshold_sat }} sat received from others are dust and left out of every figure, as if they had never been the wallet's: at the closing block the wallet's addresses hold {{ r.dust.count }}, {{ r.dust.total_btc }} in all ({{ r.name | default("report") }}.json lists them). Spending them would cost more in fees than they hold, so they are left where they are; what is proven is control, not its absence.{% endif %}{% if r.dust.swept_count %} Dust the wallet spent in the period ({{ r.dust.swept_count }}, {{ r.dust.swept_btc }} in all) is booked in the block that spent it, as a movement of its own named after the output.{% endif %}</p>
+  <p>Wallet {{ r.label }}{% if r.policy == "1 of 1" %}, single key{% elif r.policy %}, {{ r.policy }} keys{% endif %}, {{ r.chain }} chain; opening figures at block {{ r.period.start.height }}, closing at block {{ r.period.end.height }}{% if r.period.to_tip %}, the tip when prepared{% endif %}. Holdings and movements as known to the holder's node; no descriptor or extended public key is disclosed.</p>
+  <p>Prepared {{ r.generated_utc | utc }} by {{ r.tool }}; reference {{ r.report_id }}. With this statement: <code>{{ r.name | default("report") }}.json</code>, <code>{{ r.name | default("report") }}.csv</code>{% if r.bundles %} and the proofs, {% for b in r.bundles %}<code>ledger/{{ b.bundle }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}; <code>bip322-audit verify FILE</code> checks a proofs file against a node{% if r.closing.coins %}, and the commands on the UTXO pages paste as they stand{% endif %}. The tools: https://github.com/embeddednation/bip322-report.</p>
+</div>
+</div>
+</body>
+</html>
