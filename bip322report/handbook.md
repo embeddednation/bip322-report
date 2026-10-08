@@ -158,7 +158,9 @@ bundle.
 ## The auditor's procedure
 
 What arrives: the statement directory. What is needed: a Bitcoin Core node
-with the chain (no wallet, no txindex), and the three packages.
+with the chain (no wallet, no txindex), and `pip install bip322-audit`
+(`bip322-audit[kernel]` on Linux x86_64 with Python 3.12 adds Bitcoin Core's
+script interpreter as a second engine; bip322-report is not needed to verify).
 
 1. **Read the statement.** Page 1: the movements, whose closing row is the
    holdings on the chain, and the closing UTXOs. Any failed check appears
@@ -168,7 +170,7 @@ with the chain (no wallet, no txindex), and the three packages.
    wallet's net.
 2. **Re-verify the bundles** on your own node:
    `bip322-audit verify treasury-2026/ledger/2026-year-end/proofs.json`.
-   This checks every signature with two independent engines, that the
+   This checks every signature with every engine installed, that the
    block named in the message exists at that height with that time, and
    that every output the file lists existed at that block.
 3. **Re-run any page.** Each UTXO page prints two commands with their
