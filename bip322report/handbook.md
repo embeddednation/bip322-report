@@ -50,6 +50,11 @@ python3 -m venv ~/.bip322
 ~/.bip322/bin/pip install "bip322-report[kernel,pdf]"
 ```
 
+Python 3.11 or newer is needed (3.12 for `[kernel]`); if `python3 --version`
+is older, install one beside it and make the venv from that, e.g. on
+Ubuntu 22.04 `sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install
+python3.12 python3.12-venv`, then `python3.12 -m venv ~/.bip322`.
+
 `[kernel]` adds Bitcoin Core's consensus library as a second verification
 engine; `[pdf]` adds WeasyPrint for the PDF (it needs Pango on the machine;
 see the README). Upgrading is the same line with `--upgrade`. The commands talk to the node

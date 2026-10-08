@@ -31,8 +31,10 @@ export PATH="$HOME/.bip322/bin:$PATH"
 bip322 engines && bip322-audit help && bip322-report help
 ```
 
-Leave out `[kernel]` on anything but CPython 3.12 / Linux x86_64 (btclib
-remains as the verifier). For a reproducible, hash-pinned install, clone and
+Python 3.11 or newer (on Ubuntu 22.04: `apt install python3.12 python3.12-venv`
+from the deadsnakes PPA, then `python3.12 -m venv ~/.bip322`). Leave out
+`[kernel]` on anything but CPython 3.12 / Linux x86_64 (btclib remains as the
+verifier). For a reproducible, hash-pinned install, clone and
 use the setup script:
 
 ```sh
