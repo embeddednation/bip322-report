@@ -77,8 +77,8 @@ bip322 report --year 2026
 ```
 
 The wallet is `-w NAME`, else `wallet` in `~/bip322/config.toml`, else the
-node's one loaded wallet; `-o DIR` writes the statement elsewhere. The tree
-and the configuration file are described in bip322-audit's README and the
+node's one loaded wallet; `-o DIR` writes the statement elsewhere, `--dir DIR`
+moves the whole tree. The tree and the configuration file are described in bip322-audit's README and the
 handbook; the keys this package reads are `wallet`, `cli`, `holder`,
 `dust`, `theme`, `heading`, `explorer`, and `node` per wallet.
 

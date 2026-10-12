@@ -39,8 +39,8 @@ given as its argument.
 
 ## Where everything lives
 
-One directory, `~/bip322` (`BIP322_DIR` moves it), with one configuration
-file and one directory per wallet. The tools name everything in it; `-w`
+One directory, `~/bip322` (`--dir DIR` or `BIP322_DIR` moves it), with one
+configuration file and one directory per wallet. The tools name everything in it; `-w`
 names the wallet, and the wallet names the rest:
 
 ```

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.1 (2026-10-12)
+
+- `--dir DIR` puts the tree elsewhere than `~/bip322` (as `BIP322_DIR` does).
+- `-w`, `--dir` and `--cli` go before or after any command; `block -w NAME`
+  was refused. Needs bip322-audit 0.13.1.
+
 ## 0.10.0 (2026-10-12)
 
 The statement goes to `~/bip322/<wallet>/statements/<label>/` and its proofs

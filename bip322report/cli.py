@@ -1,6 +1,6 @@
 """``bip322-report``: the statement of a period, backed by verified BIP-322 proofs, from the owner's node wallet.
 
-The statement goes to ``~/bip322/<wallet>/statements/<label>/`` (``BIP322_DIR`` moves the tree) as
+The statement goes to ``~/bip322/<wallet>/statements/<label>/`` (``--dir`` or ``BIP322_DIR`` moves the tree) as
 ``<wallet>-<label>.pdf`` (``.html`` where the PDF cannot be made), ``.json``, ``.csv``, and a copy of
 each proofs file it cites; the proofs come from ``~/bip322/<wallet>/snapshots/``.  ``-w`` names the
 wallet, else ``config.toml`` does, else the node's one loaded wallet is it.
@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from bip322audit.audit import AuditError
-from bip322audit.datadir import Config, ConfigError, data_dir, snapshots_dir, statements_dir
+from bip322audit.datadir import Config, ConfigError, data_dir, snapshots_dir, statements_dir, use_data_dir
 from bip322audit.proofs import find_proofs
 from bip322audit.rpc import BitcoinCli, RpcError, btc
 from bip322core._version import SPEC
@@ -63,10 +63,11 @@ def _setting(args, config: Config, name: str, key: str, wallet: str | None, defa
     return given if given is not None else config.get(key, wallet, default)
 
 
-def _add_node_args(p: argparse.ArgumentParser, wallet: bool = True) -> None:
+def _add_node_args(p: argparse.ArgumentParser) -> None:
+    """The global options again, so that they may follow the command as well as precede it."""
     p.add_argument("--cli", dest="cli_sub", metavar="CMD", help="how to reach the node (may also be given before the command)")
-    if wallet:
-        p.add_argument("--wallet", "-w", dest="wallet_sub", metavar="NAME", help="the wallet (may also be given before the command)")
+    p.add_argument("--wallet", "-w", dest="wallet_sub", metavar="NAME", help="the wallet (may also be given before the command)")
+    p.add_argument("--dir", dest="dir_sub", metavar="DIR", help="the data directory (may also be given before the command)")
 
 
 def _progress(line: str) -> None:
@@ -343,7 +344,7 @@ def build_parser() -> argparse.ArgumentParser:
             f"control, from the owner's node wallet ({SPEC}). With no command the statement is made: "
             "bip322-report [--cli CMD] [-w NAME] (--year Y | --from WHEN --to WHEN | --from-height H --to-height H) [options]. "
             f"It goes to {data_dir()}/<wallet>/statements/<label>/ and its proofs come from {data_dir()}/<wallet>/snapshots/ "
-            "(BIP322_DIR moves the tree); config.toml there holds the defaults."
+            "(--dir or BIP322_DIR moves the tree); config.toml there holds the defaults."
         ),
     )
     parser.add_argument("--version", action="version", version=f"{TOOL} ({SPEC})")
@@ -359,7 +360,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="NAME",
         help=f"the wallet: its directory {data_dir()}/NAME, and the node wallet of that name (or the one its [wallets.NAME] table "
-        "names as node). Default: wallet in config.toml, else the node's one loaded wallet",
+        "names as node). Default: wallet in config.toml, else the node's one loaded wallet. May also follow the command.",
+    )
+    parser.add_argument(
+        "--dir",
+        default=None,
+        metavar="DIR",
+        help=f"the data directory (default {data_dir()}: BIP322_DIR in the environment, else ~/bip322). May also follow the command.",
     )
     sub = parser.add_subparsers(dest="command", metavar="command")
     sub.required = True
@@ -370,7 +377,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Height, hash and time of the last block whose header time is before the instant (YYYY-MM-DD is midnight UTC).",
     )
     p.add_argument("when", metavar="WHEN", help="YYYY-MM-DD or an ISO 8601 instant")
-    _add_node_args(p, wallet=False)
+    _add_node_args(p)
     p.add_argument("--output", "-o", metavar="FILE", help="write the JSON here instead of stdout")
     p.set_defaults(func=cmd_block, examples=["block 2026-01-01", "block 2025-12-31T23:00:00Z"])
 
@@ -491,7 +498,7 @@ def cmd_handbook(args) -> int:
 
 
 COMMANDS = ("history", "block", "balance", "report", "handbook", "help")
-_GLOBAL_WITH_VALUE = ("--cli", "--wallet", "-w")
+_GLOBAL_WITH_VALUE = ("--cli", "--wallet", "-w", "--dir")
 
 
 def with_default_command(argv: list[str]) -> list[str]:
@@ -507,7 +514,7 @@ def with_default_command(argv: list[str]) -> list[str]:
         tok = argv[i]
         if tok in _GLOBAL_WITH_VALUE:
             i += 2
-        elif tok.startswith(("--cli=", "--wallet=")) or (tok.startswith("-w") and not tok.startswith("--")):
+        elif tok.startswith(("--cli=", "--wallet=", "--dir=")) or (tok.startswith("-w") and not tok.startswith("--")):
             i += 1
         elif tok in COMMANDS or tok in ("-h", "--help", "--version"):
             return argv
@@ -518,6 +525,7 @@ def with_default_command(argv: list[str]) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(with_default_command(sys.argv[1:] if argv is None else list(argv)))
+    use_data_dir(_opt(args, "dir"))
     try:
         return args.func(args)
     except (CLIError, ConfigError, BIP322Error, RpcError, AuditError, ValueError, RuntimeError) as exc:

@@ -397,7 +397,23 @@ def test_the_statement_is_the_default_command(wallet, run, capsys):
     for untouched in (["--version"], ["history", "--help"], ["help", "report"]):
         assert with_default_command(untouched) == untouched
     assert with_default_command(["-w", "x"]) == ["-w", "x", "report"]
+    assert with_default_command(["--dir", "d", "-y", "2026"]) == ["--dir", "d", "report", "-y", "2026"]
+    assert with_default_command(["--dir=d"]) == ["--dir=d", "report"]
     node = _node(wallet, tip=1000)
     assert run(node, *HEIGHTS, "-o", "short")[0] == run(node, "report", *HEIGHTS, "-o", "long")[0] == 1  # no proofs: ATTENTION, both ways
     assert _written("short", ".json").exists() and _written("long", ".json").exists()
     assert run(node)[0] == 0 and "history" in run(node, "help")[1]  # nothing at all lists the commands
+
+
+def test_wallet_and_dir_go_before_or_after_any_command(bundles, wallet, run, tmp_path):
+    """-w and --dir are taken on either side of every command, and --dir beats BIP322_DIR."""
+    node = _node(wallet, tip=1000)
+    elsewhere = tmp_path / "elsewhere"
+    _place(bundles, elsewhere / "watch" / "snapshots" / "full", "full")
+    code, out, err = run(node, "report", *HEIGHTS, "--dir", elsewhere, "-w", "watch")
+    assert code == 0 and "RESULT: OK" in err and out.strip() == str(elsewhere / "watch" / "statements" / "979..1000")
+    assert _written(out.strip(), ".json").name == "watch-979..1000.json" and not (tmp_path / "bip322").exists()
+    code, _, err = run(node, "--dir", elsewhere, "report", *HEIGHTS, "-w", "watch")
+    assert code == 2 and "exists and is not empty" in err  # the same place, found again
+    for argv in (["block", "-w", "x", "2026-01-01"], ["history", "--dir", "d", "-w", "x"], ["report", "-y", "2026", "--dir", "d"]):
+        cli_module.build_parser().parse_args(argv)  # accepted after the command
