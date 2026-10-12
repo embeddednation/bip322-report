@@ -5,14 +5,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from bip322audit.audit import finalize_bundle
-from bip322audit.ledger import proven_addresses
-from bip322audit.snapshot import take_snapshot, write_bundle
+from bip322audit.audit import finalize_snapshot
+from bip322audit.proofs import proven_addresses
+from bip322audit.snapshot import take_snapshot, write_snapshot
 from bip322core.dev.signing import sign_psbt
 from bip322core.psbt import parse_psbt
 from fake_node import T0, FakeNode, block_time, fake_hash
 
-from bip322report.coverage import cover_coins, load_ledger, pending_bundles
+from bip322report.coverage import cover_coins, load_proofs_files, pending_snapshots
 from bip322report.fiat import Rates
 from bip322report.history import History, fetch_history
 from bip322report.period import block, last_block_before, parse_when, period_between, period_for_heights, period_for_year
@@ -86,14 +86,14 @@ def test_periods_resolve_to_the_last_block_before_an_instant(wallet):
 def _bundle(directory: Path, node: FakeNode, wallet, signers, template="Proof of control {date}", skip=None, addresses=None) -> dict:
     """snapshot (or prove given addresses), sign with two cosigners, finalize (recording spends from the fake wallet)."""
     snapshot, psbts = take_snapshot(node, wallet, template, skip_addresses=skip, addresses=addresses)
-    write_bundle(directory, snapshot, psbts)
+    write_snapshot(directory, snapshot, psbts)
     for entry in snapshot.addresses:
         psbt = parse_psbt((directory / entry["file"]).read_text())
         for signer in signers[:2]:
             assert sign_psbt(psbt, signer) == 1
         (directory / "signed" / Path(entry["file"]).name.replace(".psbt", "-part.psbt")).write_text(psbt.to_string())
-    document = finalize_bundle(directory, cli=node)
-    (directory / "proofs.json").write_text(json.dumps(document, indent=2))
+    document = finalize_snapshot(directory, cli=node)
+    (directory / f"{directory.name}-proofs.json").write_text(json.dumps(document, indent=2))  # named by the test: one stamp, many files
     return document
 
 
@@ -107,7 +107,7 @@ def test_report_backs_every_closing_coin_with_a_verified_proof(tmp_path, wallet,
     history = fetch_history(node)
     period = period_for_heights(node, 1000, 1020, label="test")
     # only the first bundle: the two new outputs have no proof yet
-    report = build_report(history, period, label="Treasury", ledger_roots=[ledger], cli=node)
+    report = build_report(history, period, label="Treasury", proofs_roots=[ledger], cli=node)
     assert report["opening"]["total_sat"] == 85_000_000 and report["closing"]["total_sat"] == 63_900_000
     assert report["reconciliation"]["ok"] and report["totals"] == {
         "received_sat": 0, "received_btc": "0.00000000", "sent_sat": 20_000_000, "sent_btc": "0.20000000",
@@ -117,7 +117,11 @@ def test_report_backs_every_closing_coin_with_a_verified_proof(tmp_path, wallet,
     cov = report["coverage"]
     assert (cov["covered_count"], cov["total_count"], cov["covered_sat"], cov["complete"]) == (1, 3, 25_000_000, False)
     assert {(u["txid"][:2], u["vout"]) for u in cov["uncovered"]} == {("dd", 1), ("ee", 0)}
-    assert report["bundles"][0]["verified"] and report["bundles"][0]["signatures"] == "2/2" and report["bundles"][0]["used_for"] == 1
+    assert (
+        report["proofs_files"][0]["verified"]
+        and report["proofs_files"][0]["signatures"] == "2/2"
+        and report["proofs_files"][0]["used_for"] == 1
+    )
     assert report["node_check"]["ok"] and not report["ok"]
     assert [t["txid"][:2] for t in report["pending_transactions"]] == ["ff"]
     assert "ATTENTION" in format_summary(report) and "UNCOVERED 0.38900000 BTC" in format_summary(report)
@@ -129,17 +133,17 @@ def test_report_backs_every_closing_coin_with_a_verified_proof(tmp_path, wallet,
     (ledger / "snapshot-3" / "snapshot.json").write_text(
         json.dumps({"addresses": [{"address": wallet.derive(0).address}]})
     )  # not yet signed
-    report = build_report(history, period, label="Treasury", ledger_roots=[ledger], cli=node, rates=Rates.constant_rate("SEK", "1000000"))
+    report = build_report(history, period, label="Treasury", proofs_roots=[ledger], cli=node, rates=Rates.constant_rate("SEK", "1000000"))
     cov = report["coverage"]
     assert cov["complete"] and cov["covered_sat"] == 63_900_000 and report["ok"]
     sends = [x for x in report["transactions"] if x["kind"] == "send"]
     assert all(x["amount_sat"] == x["net_sat"] + x["fee_sat"] for x in sends)  # amount = what the receivers got, (sent); fee beside it
     # dust: outputs at or below the threshold that others paid and the wallet has not spent are left out of every figure
-    dusty = build_report(history, period, label="Treasury", ledger_roots=[ledger], cli=node, dust_sat=1000)
+    dusty = build_report(history, period, label="Treasury", proofs_roots=[ledger], cli=node, dust_sat=1000)
     assert dusty["dust"]["count"] == 0 and dusty["coverage"] == report["coverage"] and dusty["closing"]["total_sat"] == 63_900_000
     # at any threshold: bb:0 was received and is held, so it is dust; aa:0 and cc:0 were received as dust and are booked where
     # the wallet spends them; dd:1 and ee:0 are the wallet's own change
-    dusty = build_report(history, period, label="Treasury", ledger_roots=[ledger], cli=node, dust_sat=63_900_000)
+    dusty = build_report(history, period, label="Treasury", proofs_roots=[ledger], cli=node, dust_sat=63_900_000)
     assert (
         [c["txid"][:2] for c in dusty["dust"]["coins"]] == ["bb"]
         and dusty["dust"]["total_sat"] == 25_000_000
@@ -157,8 +161,8 @@ def test_report_backs_every_closing_coin_with_a_verified_proof(tmp_path, wallet,
     assert "left out of every figure" in render_html(dusty)
     by_out = {(c["txid"][:2], c["vout"]): c["proof"] for c in report["closing"]["coins"]}
     assert by_out[("bb", 0)]["message"].startswith("Owner proof") and by_out[("bb", 0)]["verified"]
-    assert by_out[("dd", 1)]["bundle"].endswith("snapshot-2/proofs.json") and by_out[("dd", 1)]["stamp"]["height"] == 1014
-    assert [b["used_for"] for b in report["bundles"]] == [1, 2] and report["pending_bundles"] == ["snapshot-3"]
+    assert by_out[("dd", 1)]["file"] == "snapshot-2-proofs.json" and by_out[("dd", 1)]["stamp"]["height"] == 1014
+    assert [b["used_for"] for b in report["proofs_files"]] == [1, 2] and report["pending_snapshots"] == ["snapshot-3"]
     dd = next(t for t in report["transactions"] if t["txid"].startswith("dd"))
     assert dd["fiat"] == {"currency": "SEK", "rate": "1000000", "amount": "-200000.00", "net": "-210000.00", "fee": "10000.00"}
 
@@ -172,11 +176,11 @@ def test_report_backs_every_closing_coin_with_a_verified_proof(tmp_path, wallet,
     )
     assert "VALID" in html and "no proof" not in html and "Attention" not in html
     assert report["report_id"] and len(report["report_id"]) == 16 and report["report_id"] in html and report["holder"] is None
-    again = build_report(history, period, label="Treasury", ledger_roots=[ledger], cli=node, rates=Rates.constant_rate("SEK", "1000000"))
+    again = build_report(history, period, label="Treasury", proofs_roots=[ledger], cli=node, rates=Rates.constant_rate("SEK", "1000000"))
     assert again["report_id"] == report["report_id"]  # the same facts give the same reference, whenever generated
     assert [t["balance_after_sat"] for t in report["transactions"]] == [64_000_000, 63_900_000]  # a running balance
     assert "(0.20000000)" in html and "(0.01000000)" in html  # the amount sent and the fee, both in accounting parentheses
-    with_holder = render_html(build_report(history, period, label="Treasury", holder="Demo Holdings AB", ledger_roots=[ledger], cli=node))
+    with_holder = render_html(build_report(history, period, label="Treasury", holder="Demo Holdings AB", proofs_roots=[ledger], cli=node))
     assert "Demo Holdings AB" in with_holder
     assert "href=" not in render_html(report, explorer="") and "href=" not in render_html(report)  # links only when an explorer is named
     csv_path = tmp_path / "t.csv"
@@ -188,11 +192,11 @@ def test_report_backs_every_closing_coin_with_a_verified_proof(tmp_path, wallet,
     )
     assert "send,-0.20000000,0.01000000,-0.21000000,1000000,-200000.00,10000.00,-210000.00" in lines[1]
 
-    # coverage prefers a verified proof with the latest stamp; the ledger can be given as its bundles too
-    bundles = load_ledger(node, [ledger / "snapshot-1", ledger / "snapshot-2"])
-    covers = cover_coins(history.coins_at(1020), bundles)
-    assert [c.bundle.path.parent.name for c in covers[("bb" * 32, 0)]] == ["snapshot-1"]
-    assert pending_bundles([ledger]) == [ledger / "snapshot-3"]
+    # coverage prefers a verified proof with the latest stamp; the proofs files can be given as their snapshots too
+    files = load_proofs_files(node, [ledger / "snapshot-1", ledger / "snapshot-2"])
+    covers = cover_coins(history.coins_at(1020), files)
+    assert [c.proofs.path.parent.name for c in covers[("bb" * 32, 0)]] == ["snapshot-1"]
+    assert pending_snapshots([ledger]) == [ledger / "snapshot-3"]
 
 
 def test_report_without_a_node_verifies_signatures_only(tmp_path, wallet, signer_expressions):
@@ -201,13 +205,13 @@ def test_report_without_a_node_verifies_signatures_only(tmp_path, wallet, signer
     _bundle(ledger / "b", node, wallet, signer_expressions)
     history = fetch_history(node)
     period = period_for_heights(node, 979, 1000)
-    report = build_report(history, period, label="x", ledger_roots=[ledger], cli=None, engines=["btclib"])
+    report = build_report(history, period, label="x", proofs_roots=[ledger], cli=None, engines=["btclib"])
     assert (
         report["opening"]["total_sat"] == 0
         and report["closing"]["total_sat"] == 85_000_000
         and report["totals"]["received_sat"] == 85_000_000
     )
-    assert report["node_check"] is None and report["coverage"]["complete"] and report["bundles"][0]["stamp_ok"] is None
+    assert report["node_check"] is None and report["coverage"]["complete"] and report["proofs_files"][0]["stamp_ok"] is None
     assert all(c["proof"]["verified"] for c in report["closing"]["coins"])
 
 
@@ -231,6 +235,7 @@ def test_cli_end_to_end_with_fake_node(tmp_path, wallet, signer_expressions, mon
     ledger = tmp_path / "ledger"
     _bundle(ledger / "one", _node(wallet, tip=1000), wallet, signer_expressions)
     monkeypatch.setattr(cli_module, "BitcoinCli", lambda command: node)
+    monkeypatch.setattr(cli_module, "_pdf_possible", lambda: False)
     monkeypatch.chdir(tmp_path)
 
     assert cli_module.main(["block", "2023-11-15"]) == 0
@@ -257,7 +262,7 @@ def test_cli_end_to_end_with_fake_node(tmp_path, wallet, signer_expressions, mon
                 "1000",
                 "--to-height",
                 "1012",
-                "--ledger",
+                "--snapshots",
                 str(ledger),
                 "-o",
                 "out",
@@ -267,17 +272,21 @@ def test_cli_end_to_end_with_fake_node(tmp_path, wallet, signer_expressions, mon
     )
     out, err = capsys.readouterr()
     assert out.strip() == "out" and "RESULT: ATTENTION" in err and "proof coverage: 1/3" in err
-    written = json.loads(Path("out/out.json").read_text())
+    written = json.loads(Path("out/watch-1000..1012.json").read_text())
     assert (
         written["label"] == "watch"
         and not written["coverage"]["complete"]
-        and Path("out/out.html").exists()
-        and Path("out/out.csv").exists()
+        and Path("out/watch-1000..1012.html").exists()
+        and Path("out/watch-1000..1012.csv").exists()
     )
-    assert (
-        Path("out/ledger/one/proofs.json").read_bytes() == (ledger / "one" / "proofs.json").read_bytes()
-    )  # what the reader gets, no PSBTs
-    assert not any(p.suffix == ".psbt" for p in Path("out").rglob("*")) and written["bundles"][0]["bundle"] == "one/proofs.json"
+    assert Path("out/one-proofs.json").read_bytes() == (ledger / "one" / "one-proofs.json").read_bytes()  # what the reader gets, no PSBTs
+    assert not any(p.suffix == ".psbt" for p in Path("out").rglob("*")) and written["proofs_files"][0]["file"] == "one-proofs.json"
+    assert sorted(p.name for p in Path("out").iterdir()) == [
+        "one-proofs.json",
+        "watch-1000..1012.csv",
+        "watch-1000..1012.html",
+        "watch-1000..1012.json",
+    ]
     assert (
         cli_module.main(["report", "--history", "history.json", "--from-height", "1000", "--to-height", "1012", "-o", "out"]) == 2
     )  # not empty
@@ -288,7 +297,7 @@ def test_cli_end_to_end_with_fake_node(tmp_path, wallet, signer_expressions, mon
     monkeypatch.setattr("bip322report.period._now", lambda: datetime.fromtimestamp(block_time(1012) + 60, UTC))
     assert cli_module.main(["report", "--history", "history.json", "--year", "2023", "-o", "y", "--rate", "5", "--currency", "USD"]) == 1
     capsys.readouterr()
-    written = json.loads(Path("y/y.json").read_text())
+    written = json.loads(Path("y/watch-2023.json").read_text())
     assert (
         written["period"]["label"] == "2023"
         and written["fiat"] == {"currency": "USD", "source": "constant 5 USD/BTC"}
@@ -338,10 +347,10 @@ def test_change_address_proven_before_the_spend_covers_the_change_output(tmp_pat
 
     node = _node(wallet, tip=1020)
     history = fetch_history(node)
-    report = build_report(history, period_for_heights(node, 1000, 1020), label="T", ledger_roots=[ledger], cli=node)
+    report = build_report(history, period_for_heights(node, 1000, 1020), label="T", proofs_roots=[ledger], cli=node)
     by_out = {(c["txid"][:2], c["vout"]): c["proof"] for c in report["closing"]["coins"]}
     dd = by_out[("dd", 1)]
-    assert dd["verified"] and dd["bundle"] == "change-ahead/proofs.json" and dd["before_output"] and not dd["lists_output"]
+    assert dd["verified"] and dd["file"] == "change-ahead-proofs.json" and dd["before_output"] and not dd["lists_output"]
     assert not dd["after_period"] and report["coverage"]["covered_after_period_count"] == 0  # every proof here predates block 1020
     # before a year-end bundle, only a3 (the internal move's destination) is left to prove
     snapshot, _ = take_snapshot(node, wallet, "x", skip_addresses=proven_addresses([ledger]))
@@ -349,9 +358,9 @@ def test_change_address_proven_before_the_spend_covers_the_change_output(tmp_pat
     later = _bundle(ledger / "year-end", _node(wallet, tip=1040), wallet, signer_expressions, "Proof of control, audit FY2023, {date}")
     assert int(later["stamp"]["height"]) == 1034
     node40 = _node(wallet, tip=1040)
-    report40 = build_report(fetch_history(node40), period_for_heights(node40, 1000, 1020), label="T", ledger_roots=[ledger], cli=node40)
+    report40 = build_report(fetch_history(node40), period_for_heights(node40, 1000, 1020), label="T", proofs_roots=[ledger], cli=node40)
     assert report40["coverage"]["covered_after_period_count"] == 3 and "stamped after the period's end: 3/3" in format_summary(report40)
-    assert all(c["proof"]["after_period"] and c["proof"]["bundle"] == "year-end/proofs.json" for c in report40["closing"]["coins"])
+    assert all(c["proof"]["after_period"] and c["proof"]["file"] == "year-end-proofs.json" for c in report40["closing"]["coins"])
     assert "Attention" not in render_html(report40) and "Attention" in render_html({**report40, "ok": False})
     assert by_out[("bb", 0)]["lists_output"] and not by_out[("bb", 0)]["before_output"]
     assert by_out[("ee", 0)] is None  # the internal move went to a3, never proven
@@ -392,7 +401,7 @@ def test_a_failed_lookup_does_not_hide_a_contradiction(tmp_path, wallet, signer_
 
     ledger, node = _proven(tmp_path, wallet, signer_expressions)
     history, period = fetch_history(node), period_for_heights(node, 1000, 1020)
-    assert build_report(history, period, label="T", ledger_roots=[ledger], cli=node)["ok"]
+    assert build_report(history, period, label="T", proofs_roots=[ledger], cli=node)["ok"]
     real = report_module.holdings
 
     def lookups(fail_at, contradict):
@@ -407,7 +416,7 @@ def test_a_failed_lookup_does_not_hide_a_contradiction(tmp_path, wallet, signer_
         return holdings
 
     monkeypatch.setattr(report_module, "holdings", lookups(994, 1))  # bb's lookup fails; the chain disagrees on dd and ee
-    report = build_report(history, period, label="T", ledger_roots=[ledger], cli=node)
+    report = build_report(history, period, label="T", proofs_roots=[ledger], cli=node)
     oc = report["onchain"]
     assert (oc["contradicted"], oc["not_run"], oc["matches"], oc["error"]) == (2, 1, 0, "gettxout timed out")
     assert not report["ok"] and report["coverage"]["complete"] and report["reconciliation"]["ok"]
@@ -417,7 +426,7 @@ def test_a_failed_lookup_does_not_hide_a_contradiction(tmp_path, wallet, signer_
     assert "Attention" in html and "2 contradicted · 1 not run" in html and html.count("CONTRADICTED") == 2
 
     monkeypatch.setattr(report_module, "holdings", lookups(994, 0))  # a lookup that could not run is not a contradiction
-    report = build_report(history, period, label="T", ledger_roots=[ledger], cli=node)
+    report = build_report(history, period, label="T", proofs_roots=[ledger], cli=node)
     assert report["ok"] and "2/3 held when proven, 1 not run (gettxout timed out)" in format_summary(report)
     assert "Attention" not in render_html(report) and "NOT RUN" in render_html(report)
 
@@ -426,7 +435,7 @@ def test_report_built_without_a_node_renders(tmp_path, wallet, signer_expression
     ledger = tmp_path / "ledger"
     node = _node(wallet, tip=1000)
     _bundle(ledger / "b", node, wallet, signer_expressions)
-    report = build_report(fetch_history(node), period_for_heights(node, 979, 1000), label="x", ledger_roots=[ledger], cli=None)
+    report = build_report(fetch_history(node), period_for_heights(node, 979, 1000), label="x", proofs_roots=[ledger], cli=None)
     assert report["onchain"] is None and all(c["onchain"] is None for c in report["closing"]["coins"])
     html = render_html(report)
     assert html.count("NOT RUN") == 3 and "not run when this statement was prepared" in html and "Attention" not in html
@@ -446,7 +455,7 @@ def test_reference_depends_only_on_the_facts_stated(tmp_path, wallet, signer_exp
     for tip, with_node in ((1040, True), (1041, True), (1041, False)):
         node = _node(wallet, tip=tip)
         history, period = fetch_history(node), period_for_heights(node, 1000, 1020)
-        reports.append(build_report(history, period, label="T", ledger_roots=[ledger], cli=node if with_node else None))
+        reports.append(build_report(history, period, label="T", proofs_roots=[ledger], cli=node if with_node else None))
     at_1040, at_1041, offline = reports
     assert at_1040["closing"]["coins"][0]["onchain"]["tip"] == 1040 and at_1041["closing"]["coins"][0]["onchain"]["tip"] == 1041
     assert at_1040["report_id"] == at_1041["report_id"] == offline["report_id"]  # a new block, or no node, states nothing new
@@ -463,7 +472,7 @@ def test_reference_depends_only_on_the_facts_stated(tmp_path, wallet, signer_exp
         at_1040["report_id"],
         changed(lambda r: r["closing"]["coins"][0].update(amount_sat=1)),
         changed(lambda r: r["closing"]["coins"][0]["proof"].update(signature="smpAAAA")),
-        changed(lambda r: r["closing"]["coins"][0]["proof"].update(bundle="elsewhere/proofs.json")),
+        changed(lambda r: r["closing"]["coins"][0]["proof"].update(file="elsewhere-proofs.json")),
         changed(lambda r: r["closing"]["coins"][0].update(proof=None)),
         changed(lambda r: r["opening"]["coins"][0].update(address="bc1qother")),
         changed(lambda r: r["transactions"][0].update(fee_sat=1)),
@@ -510,7 +519,7 @@ def test_node_check_tells_a_mempool_spend_from_a_mismatch(tmp_path, wallet, sign
     node = _node(wallet, tip=1020)
     node.hide_mempool_spent = True  # ff, unconfirmed, spends bb:0; a node wallet then leaves bb:0 out of listunspent
     history, period = fetch_history(node), period_for_heights(node, 1000, 1020)
-    report = build_report(history, period, label="x", ledger_roots=[ledger], cli=node)
+    report = build_report(history, period, label="x", proofs_roots=[ledger], cli=node)
     nc = report["node_check"]
     assert nc["ok"] is True and nc["spent_in_mempool"] == [f"{'bb' * 32}:0"] and nc["not_in_listunspent"] == [] and report["ok"]
     assert (nc["listunspent_count"], nc["closing_count"]) == (2, 3) and ("gettxout", "bb" * 32, 0, False) in node.calls
@@ -519,7 +528,7 @@ def test_node_check_tells_a_mempool_spend_from_a_mismatch(tmp_path, wallet, sign
 
     # an output the chain itself says is spent, in a transaction the history lacks, is a mismatch
     node.add("12" * 32, 1020, [("dd" * 32, 1)], [(EXTERNAL, 28_990_000)])
-    report = build_report(history, period, label="x", ledger_roots=[ledger], cli=node)
+    report = build_report(history, period, label="x", proofs_roots=[ledger], cli=node)
     nc = report["node_check"]
     assert nc["ok"] is False and nc["not_in_listunspent"] == [f"{'dd' * 32}:1"] and nc["spent_in_mempool"] == [f"{'bb' * 32}:0"]
     assert not report["ok"] and f"MISMATCH: not in listunspent {'dd' * 32}:1" in format_summary(report)
@@ -558,7 +567,7 @@ def test_spent_since_names_the_spending_transaction(tmp_path, wallet, signer_exp
     _bundle(ledger / "all", _node(wallet, tip=1000), wallet, signer_expressions)
     node = _node(wallet, tip=1020)
     period = period_for_heights(node, 985, 1000)
-    report = build_report(fetch_history(node), period, label="T", ledger_roots=[ledger], cli=node)
+    report = build_report(fetch_history(node), period, label="T", proofs_roots=[ledger], cli=node)
     rows = {c["txid"][:2]: c for c in report["closing"]["coins"]}
     assert {k: r["onchain"]["status"] for k, r in rows.items()} == {"aa": "spent_since", "bb": "matches", "cc": "spent_since"}
     assert rows["aa"]["spent_by"] == {"txid": "dd" * 32, "height": 1005, "time_utc": "2023-11-21T21:43:20Z"}
@@ -575,7 +584,7 @@ def test_spent_since_names_the_spending_transaction(tmp_path, wallet, signer_exp
     assert "1/3 held when proven, 2 spent since" in format_summary(report) and "RESULT: OK" in format_summary(report)
 
     stale = build_report(
-        fetch_history(_node(wallet, tip=1000)), period, label="T", ledger_roots=[ledger], cli=node
+        fetch_history(_node(wallet, tip=1000)), period, label="T", proofs_roots=[ledger], cli=node
     )  # read before the spends
     rows = {c["txid"][:2]: c for c in stale["closing"]["coins"]}
     assert rows["aa"]["onchain"]["status"] == "spent_since" and rows["aa"]["spent_by"] is None
@@ -605,7 +614,7 @@ def test_a_proof_that_fails_the_statements_own_verification_is_not_ok(tmp_path, 
         return Failed(verdict) if len(calls) == 1 else verdict
 
     monkeypatch.setattr(report_module, "verify_message", first_fails)
-    report = build_report(fetch_history(node), period_for_heights(node, 985, 1000, label="t"), label="T", ledger_roots=[ledger], cli=node)
+    report = build_report(fetch_history(node), period_for_heights(node, 985, 1000, label="t"), label="T", proofs_roots=[ledger], cli=node)
     cov = report["coverage"]
     assert cov["covered_count"] < cov["total_count"] and cov["addresses_covered"] < cov["addresses_total"]
     assert not cov["complete"] and not report["ok"] and "ATTENTION" in render_html(report)

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.10.0 (2026-10-12)
+
+The statement goes to `~/bip322/<wallet>/statements/<label>/` and its proofs
+come from `~/bip322/<wallet>/snapshots/`, the tree bip322-audit 0.13 writes
+(`BIP322_DIR` moves it); `-w` names the wallet, else `~/bip322/config.toml`,
+else the node's one loaded wallet.
+
+- The directory is named by the period alone; the files carry the wallet:
+  `<wallet>-<label>.pdf`, `.json`, `.csv`. `-o DIR` still writes elsewhere.
+- One document: the PDF when WeasyPrint is installed, otherwise one HTML
+  file with the fonts embedded; `--html` asks for the HTML. `--pdf` and the
+  `fonts/` copy are gone.
+- The proofs files the statement cites are copied flat beside it under
+  their own names, `<wallet>-<date>-<height>-proofs.json`, and cited by
+  those names; `ledger/` is gone. `--ledger` is `--snapshots`, an override.
+- `config.toml` supplies `holder`, `dust`, `theme`, `heading`, `explorer`,
+  `cli`, `wallet`, and `node` per wallet.
+- In the JSON: `proofs_files`, `proofs_files_not_used`, `pending_snapshots`,
+  and `file` in place of `bundle` on each proof; the summary says
+  "proofs FILE". The statement's footer names `bip322 audit verify`.
+- Requires bip322-audit 0.13 and bip322-core 0.11.
+
 ## 0.9.1 (2026-10-06)
 
 First public release.

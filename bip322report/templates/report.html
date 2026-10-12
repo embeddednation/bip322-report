@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>{{ r.label }} · {{ r.period.label }}</title>
 <style>
+  /* Source Serif 4 and Source Sans 3 (Adobe), JetBrains Mono (JetBrains): SIL Open Font License 1.1 */
   {% for f in faces %}
   @font-face { font-family: "{{ f.family }}"; src: url("{{ f.url }}") format("woff2"); font-weight: {{ f.weight }}; font-style: {{ f.style }}; }
   {% endfor %}
@@ -201,8 +202,8 @@
 {% if r.coverage.uncovered %}
 <p class="bad">UTXOs without a verified proof hold {{ r.coverage.uncovered_btc }}.</p>
 {% endif %}
-{% if r.pending_bundles %}
-<p class="small muted">Proofs awaiting signatures: {% for p in r.pending_bundles %}<code>{{ p }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+{% if r.pending_snapshots %}
+<p class="small muted">Proofs awaiting signatures: {% for p in r.pending_snapshots %}<code>{{ p }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.</p>
 {% endif %}
 {% if r.pending_transactions %}
 <p class="small muted">Unconfirmed transactions, in no balance: {% for t in r.pending_transactions %}{{ tx(t.txid) }} ({{ t.kind }}, {{ t.net_btc | acct }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>
@@ -394,7 +395,7 @@
 <div class="small runin muted">
   <p>Amounts in BTC to eight decimals, negatives in parentheses{% if r.fiat %}; {{ r.fiat.currency }} from {{ r.fiat.source }} at the rate on each transaction's day{% endif %}. Amount is what moved between the wallet and others, received or (sent), before the fee; the balance moves by the amount and the fee together.{% if r.totals.mixed_count %} A mixed transaction has inputs from others beside the wallet's: its fee is unknown and its amount is the wallet's net.{% endif %}{% if r.dust.count %} Outputs of at most {{ r.dust.threshold_sat }} sat received from others are dust and left out of every figure, as if they had never been the wallet's: at the closing block the wallet's addresses hold {{ r.dust.count }}, {{ r.dust.total_btc }} in all ({{ r.name | default("report") }}.json lists them). Spending them would cost more in fees than they hold, so they are left where they are; what is proven is control, not its absence.{% endif %}{% if r.dust.swept_count %} Dust the wallet spent in the period ({{ r.dust.swept_count }}, {{ r.dust.swept_btc }} in all) is booked in the block that spent it, as a movement of its own named after the output.{% endif %}</p>
   <p>Wallet {{ r.label }}{% if r.policy == "1 of 1" %}, single key{% elif r.policy %}, {{ r.policy }} keys{% endif %}, {{ r.chain }} chain; opening figures at block {{ r.period.start.height }}, closing at block {{ r.period.end.height }}{% if r.period.to_tip %}, the tip when prepared{% endif %}. Holdings and movements as known to the holder's node; no descriptor or extended public key is disclosed.</p>
-  <p>Prepared {{ r.generated_utc | utc }} by {{ r.tool }}; reference {{ r.report_id }}. With this statement: <code>{{ r.name | default("report") }}.json</code>, <code>{{ r.name | default("report") }}.csv</code>{% if r.bundles %} and the proofs, {% for b in r.bundles %}<code>ledger/{{ b.bundle }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}; <code>bip322-audit verify FILE</code> checks a proofs file against a node{% if r.closing.coins %}, and the commands on the UTXO pages paste as they stand{% endif %}. The tools: https://github.com/embeddednation/bip322-report.</p>
+  <p>Prepared {{ r.generated_utc | utc }} by {{ r.tool }}; reference {{ r.report_id }}. With this statement: <code>{{ r.name | default("report") }}.json</code>, <code>{{ r.name | default("report") }}.csv</code>{% if r.proofs_files %} and the proofs, {% for f in r.proofs_files %}<code>{{ f.file }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}; <code>bip322 audit verify FILE</code> checks a proofs file against a node{% if r.closing.coins %}, and the commands on the UTXO pages paste as they stand{% endif %}. The tools: https://github.com/embeddednation/bip322-report.</p>
 </div>
 </div>
 </body>

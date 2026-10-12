@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import csv
 import re
-import shutil
 from pathlib import Path
 from typing import TypedDict
 
@@ -63,9 +63,10 @@ JOURNAL = {  # a newspaper's palette: one red, base colours that carry text, gre
 }
 _J = JOURNAL
 
-#: Bundled typefaces (SIL OFL; see fonts/LICENSE.md): Adobe's Source Serif 4 and Source Sans 3, the open
+#: Packaged typefaces (SIL OFL; see fonts/LICENSE.md): Adobe's Source Serif 4 and Source Sans 3, the open
 #: counterparts of a newspaper's serif for reading and sans for labels and tables, and JetBrains Mono for hashes.
 FONTS_DIR = Path(__file__).parent / "fonts"
+PACKAGE_FONTS = FONTS_DIR.as_uri() + "/"  # the fonts as installed, for a PDF rendered on this machine
 FONT_FACES = [  # family, file, weight, style
     ("Source Serif 4", "SourceSerif4-Regular.woff2", 400, "normal"),
     ("Source Serif 4", "SourceSerif4-It.woff2", 400, "italic"),
@@ -311,27 +312,25 @@ def render_html(
     explorer: str | None = None,
     theme: str = "journal",
     heading: str | None = None,
-    fonts_url: str = "fonts/",
+    fonts_url: str | None = None,
 ) -> str:
-    """The statement as HTML.  Fonts are referenced at ``fonts_url`` (see ``copy_fonts``); ``heading`` overrides the theme's heading style."""
+    """The statement as HTML, one self-contained file: the fonts are embedded, unless ``fonts_url`` says where to reference them
+    (``PACKAGE_FONTS`` for a PDF rendered on this machine).  ``heading`` overrides the theme's heading style."""
     if theme not in THEMES:
         raise ValueError(f"unknown theme {theme!r}; one of {', '.join(THEMES)}")
     if heading is not None and heading not in HEADINGS:
         raise ValueError(f"unknown heading style {heading!r}; one of {', '.join(HEADINGS)}")
     t = {**THEMES[theme], "heading": heading or THEMES[theme]["heading"]}
-    faces = [{"family": f, "url": fonts_url + file, "weight": w, "style": s} for f, file, w, s in FONT_FACES]
+    faces = [{"family": f, "url": _font_url(file, fonts_url), "weight": w, "style": s} for f, file, w, s in FONT_FACES]
     fig = _figure_message(report)
     return _env().get_template("report.html").render(r=report, explorer=(explorer or "").rstrip("/") or None, t=t, faces=faces, fig=fig)
 
 
-def copy_fonts(directory: Path) -> Path:
-    """Put the bundled fonts next to a report, in ``fonts/``, where its HTML and PDF find them."""
-    target = directory / "fonts"
-    target.mkdir(parents=True, exist_ok=True)
-    for _family, file, _w, _s in FONT_FACES:
-        shutil.copyfile(FONTS_DIR / file, target / file)
-    shutil.copyfile(FONTS_DIR / "LICENSE.md", target / "LICENSE.md")
-    return target
+def _font_url(file: str, fonts_url: str | None) -> str:
+    """A ``data:`` URL holding the font itself, or its address under ``fonts_url``."""
+    if fonts_url is None:
+        return "data:font/woff2;base64," + base64.b64encode((FONTS_DIR / file).read_bytes()).decode("ascii")
+    return fonts_url + file
 
 
 def write_csv(report: dict, path: Path) -> None:
@@ -365,7 +364,7 @@ def write_csv(report: dict, path: Path) -> None:
 
 
 def write_pdf(html: str, path: Path) -> None:
-    """Render the HTML to ``path``; relative URLs in it (the fonts) resolve next to ``path``."""
+    """Render the HTML to ``path``; the fonts are read where the HTML says (``PACKAGE_FONTS`` when rendered for the PDF)."""
     try:
         from weasyprint import HTML
     except Exception as exc:  # ImportError, or an OSError when its system libraries (Pango) are missing

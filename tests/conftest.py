@@ -23,3 +23,10 @@ def wallet(descriptor_text) -> MultisigWallet:
 @pytest.fixture(scope="session")
 def signer_expressions(masters) -> list[str]:
     return [key_expression(m, private=True) for m in masters]
+
+
+@pytest.fixture(autouse=True)
+def data_directory(tmp_path, monkeypatch):
+    """Every test gets its own ~/bip322, so nothing reads or writes the developer's."""
+    monkeypatch.setenv("BIP322_DIR", str(tmp_path / "bip322"))
+    return tmp_path / "bip322"

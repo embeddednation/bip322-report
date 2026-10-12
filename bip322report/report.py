@@ -16,7 +16,7 @@ from bip322core.report import describe_address, format_verify_text
 from bip322core.verify import verify_message
 
 from . import TOOL
-from .coverage import cover_coins, load_ledger, pending_bundles, pending_name
+from .coverage import cover_coins, load_proofs_files, pending_snapshots
 from .fiat import Rates
 from .history import Coin, History, WalletTx
 from .period import Period
@@ -32,7 +32,7 @@ def build_report(
     *,
     label: str,
     holder: str | None = None,
-    ledger_roots=(),
+    proofs_roots=(),
     cli: BitcoinCli | None = None,
     rates: Rates | None = None,
     engines=None,
@@ -42,7 +42,7 @@ def build_report(
 ) -> dict:
     """The report as a plain dict (what report.json holds and the templates render).
 
-    ``cli`` is needed to re-verify the ledger's proofs against the chain and to
+    ``cli`` is needed to re-verify the proofs files under ``proofs_roots`` against the chain and to
     cross-check the closing balance with ``listunspent`` when the period runs
     to the tip; without it the proofs are verified for their signatures only.
     Outputs of at most ``dust_sat`` satoshi that others paid to the wallet
@@ -66,8 +66,8 @@ def build_report(
     opening_sat = sum(c.amount_sat for c in opening)
     closing_sat = sum(c.amount_sat for c in closing)
 
-    bundles = load_ledger(cli, ledger_roots, engines=engines, progress=progress) if ledger_roots else []
-    closing_rows, used = _closing_rows(history, closing, bundles, created, period)
+    files = load_proofs_files(cli, proofs_roots, engines=engines, progress=progress) if proofs_roots else []
+    closing_rows, used = _closing_rows(history, closing, files, created, period)
     closing_addresses = _by_address(closing_rows)
     _verify_addresses(closing_addresses, engines)
     scripts = {a["address"]: a["script"]["script_pubkey"] for a in closing_addresses}
@@ -107,16 +107,16 @@ def build_report(
         },
         "dust": _dust_block(dust, dust_sat, movements, created),
         "coverage": _coverage(closing_rows, closing_addresses, closing_sat),
-        "bundles": [
-            {**b.to_dict(), "after_period": int(b.stamp["height"]) > period.end.height, "used_for": used[b.path]}
-            for b in bundles
-            if b.path in used
+        "proofs_files": [
+            {**f.to_dict(), "after_period": int(f.stamp["height"]) > period.end.height, "used_for": used[f.path]}
+            for f in files
+            if f.path in used
         ],
-        "bundles_not_used": sum(
-            1 for b in bundles if b.path not in used
-        ),  # a bare count: what else the ledger holds is not the statement's business
-        "policy": _single({b.document.get("policy") for b in bundles if b.path in used} - {None}),
-        "pending_bundles": [pending_name(p, ledger_roots) for p in pending_bundles(ledger_roots, {c.address for c in closing})],
+        "proofs_files_not_used": sum(
+            1 for f in files if f.path not in used
+        ),  # a bare count: what else the wallet's snapshots hold is not the statement's business
+        "policy": _single({f.document.get("policy") for f in files if f.path in used} - {None}),
+        "pending_snapshots": [p.name for p in pending_snapshots(proofs_roots, {c.address for c in closing})],
         "pending_transactions": [tx.to_dict() for tx in history.pending],
         "onchain": onchain_result,
         "fiat": rates.to_dict() if rates else None,
@@ -127,22 +127,20 @@ def build_report(
     return report
 
 
-def _closing_rows(
-    history: History, closing: list[Coin], bundles: list, created: dict, period: Period
-) -> tuple[list[dict], dict[Path, int]]:
-    """The closing coins as rows, each with the best proof the ledger has for its address; and, per bundle file, the rows citing it."""
-    covers = cover_coins(closing, bundles)
+def _closing_rows(history: History, closing: list[Coin], files: list, created: dict, period: Period) -> tuple[list[dict], dict[Path, int]]:
+    """The closing coins as rows, each with the best proof there is for its address; and, per proofs file, the rows citing it."""
+    covers = cover_coins(closing, files)
     spenders: dict[tuple, WalletTx] = {}  # outpoint -> the confirmed transaction that spends it: one pass, not History.spender_of per coin
     for tx in history.txs:
         for c in tx.ours_in:
             spenders.setdefault(c.outpoint, tx)
-    used: dict[Path, int] = {}  # the bundles the statement relies on
+    used: dict[Path, int] = {}  # the proofs files the statement relies on
     rows = []
     for coin in closing:
         best = covers[coin.outpoint][0] if covers[coin.outpoint] else None
         proof = best.to_dict() if best else None
         if best:
-            used[best.bundle.path] = used.get(best.bundle.path, 0) + 1
+            used[best.proofs.path] = used.get(best.proofs.path, 0) + 1
             proof["after_period"] = int(proof["stamp"]["height"]) > period.end.height
         rows.append(
             {
@@ -168,9 +166,9 @@ def _verify_addresses(addresses: list[dict], engines) -> None:
         if not a["proof"]:
             continue
         _verify_by_script(a, engines)
-        cited = (a["proof"]["bundle"], a["proof"]["signature"])
+        cited = (a["proof"]["file"], a["proof"]["signature"])
         for o in a["outputs"]:
-            if o["proof"] and (o["proof"]["bundle"], o["proof"]["signature"]) == cited:
+            if o["proof"] and (o["proof"]["file"], o["proof"]["signature"]) == cited:
                 o["proof"]["verified"] = a["proof"]["verified"]
 
 
@@ -413,7 +411,7 @@ def _address_step(address: str) -> dict:
 def _verify_by_script(a: dict, engines) -> None:
     """Verify the proof against the scriptPubKey bytes, and keep that command and its output for the statement.
 
-    The bundle's own verification used the address; BIP-322 proves the
+    The proofs file's own verification used the address; BIP-322 proves the
     scriptPubKey, so the statement runs the verifier on the bytes the chain
     reports for the UTXO and quotes exactly that.
     """
@@ -539,7 +537,7 @@ def _report_id(report: dict) -> str:
     The facts are the wallet's label and chain, the opening and closing
     blocks, the coins at each, the movements between them (with their
     valuation when rates were given) and, for each closing UTXO, the proof
-    chosen: its bundle, address and signature.  Nothing a later run would
+    chosen: its proofs file, address and signature.  Nothing a later run would
     print differently goes in: no command output, no tip, no time of
     generation, no verifier version, nothing that happened after the period.
     """
@@ -548,7 +546,7 @@ def _report_id(report: dict) -> str:
         return [c["txid"], c["vout"], c.get("address"), c["amount_sat"], c.get("height")]
 
     def proof(p: dict | None) -> list | None:
-        return [p["bundle"], p["address"], p["signature"]] if p else None
+        return [p["file"], p["address"], p["signature"]] if p else None
 
     facts = {
         "label": report["label"],
@@ -630,14 +628,14 @@ def format_summary(report: dict) -> str:
     d = report.get("dust") or {}
     if d.get("count"):
         lines.append(f"dust: {d['count']} outputs of at most {d['threshold_sat']} sat, {d['total_btc']} BTC, left out of every figure")
-    for b in report["bundles"]:
+    for f in report["proofs_files"]:
         lines.append(
-            f"  bundle {b['bundle']}: stamp {b['stamp']['height']}, signatures {b['signatures']}, {'verified' if b['verified'] else 'NOT VERIFIED'}, used for {b['used_for']}"
+            f"  proofs {f['file']}: stamp {f['stamp']['height']}, signatures {f['signatures']}, {'verified' if f['verified'] else 'NOT VERIFIED'}, used for {f['used_for']}"
         )
-    if report.get("bundles_not_used"):
-        lines.append(f"  other bundles in the ledger, not used: {report['bundles_not_used']}")
-    if report["pending_bundles"]:
-        lines.append("  awaiting signatures: " + ", ".join(report["pending_bundles"]))
+    if report.get("proofs_files_not_used"):
+        lines.append(f"  other proofs files, not used: {report['proofs_files_not_used']}")
+    if report["pending_snapshots"]:
+        lines.append("  awaiting signatures: " + ", ".join(report["pending_snapshots"]))
     oc = report.get("onchain")
     if oc:
         lines.append(

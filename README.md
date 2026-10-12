@@ -2,9 +2,9 @@
 
 The statement of a period, in which every coin is backed by a verified BIP-322
 proof of control. Built on [bip322-audit](https://github.com/embeddednation/bip322-audit)
-(the proof bundles) and [bip322-core](https://github.com/embeddednation/bip322-core)
+(the snapshots and their proofs files) and [bip322-core](https://github.com/embeddednation/bip322-core)
 (the BIP-322 work), for the owner's side: it reads the node wallet's transaction
-history and the ledger of proof bundles, and writes the statement of a period.
+history and the wallet's snapshots, and writes the statement of a period.
 
 A statement answers, for a wallet and a period:
 
@@ -15,8 +15,8 @@ A statement answers, for a wallet and a period:
 
 Two ways of working with it, the same tool for both:
 
-* **Continuously, for yourself.** Before broadcasting a spend, prove its change address (`bip322 audit prove ADDRESS --ledger LEDGER`, sign, finalize): a valid proof means the quorum controls where the change goes. New deposit addresses the same way, or with `snapshot --skip-proven LEDGER` after the fact. A report can then be produced at any time, with every coin backed by your own signed message; a coin that arrived after its proof is marked as such (the proof shows control, not the holding).
-* **On demand, for an auditor.** After the period's end, take one full bundle (no `--skip-proven`) over every output under a message that names the audit, and produce the report for the year. Every closing coin then has a proof dated after the closing block, and the chain lookup at that block shows the coin held. The auditor verifies the bundles and the report on their own node with `bip322 audit verify` and `bitcoin-cli`.
+* **Continuously, for yourself.** Before broadcasting a spend, prove its change address (`bip322 audit prove ADDRESS`, sign, finalize): a valid proof means the quorum controls where the change goes. New deposit addresses the same way, or with `snapshot --skip-proven` after the fact. A report can then be produced at any time, with every coin backed by your own signed message; a coin that arrived after its proof is marked as such (the proof shows control, not the holding).
+* **On demand, for an auditor.** After the period's end, take one full snapshot (no `--skip-proven`) over every output under a message that names the audit, and produce the report for the year. Every closing coin then has a proof dated after the closing block, and the chain lookup at that block shows the coin held. The auditor verifies the proofs files and the report on their own node with `bip322 audit verify` and `bitcoin-cli`.
 
 The whole flow, for the holder and for the auditor, is in the [handbook](bip322report/handbook.md); `bip322 report handbook` prints it.
 
@@ -47,45 +47,51 @@ export PATH="$PWD/.venv/bin:$PATH"
 (`CORE_REF`, `AUDIT_REF`); `./setup.sh --core ../bip322-core --audit ../bip322-audit`
 uses local checkouts, which is the development setup. Nothing here needs the
 wallet descriptor: the history comes from the node wallet, the proofs from the
-ledger.
+wallet's snapshots.
 
-PDF output is optional. It needs WeasyPrint's system libraries, then the
-renderer itself, hash-pinned like everything else:
+The PDF needs WeasyPrint's system libraries, then the renderer itself,
+hash-pinned like everything else:
 
 ```sh
 sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b   # Debian/Ubuntu
 ./setup.sh --pdf                                                   # installs requirements-pdf.lock
 ```
 
-Without it `report` still writes the HTML (print it to PDF from a browser)
-plus the JSON and the CSV; `--pdf` then says what is missing.
+Without it the statement is one HTML file with the fonts inside it (print it
+to PDF from a browser), and `report` says so; `--html` asks for that.
 
 ## The flow
 
 ```sh
-# a ledger: any directory where the bip322-audit bundles accumulate.
+# everything under ~/bip322/treasury/: the snapshots bip322-audit writes, the statements this writes.
 # before broadcasting a spend: prove its change address
-bip322 audit -w treasury prove bc1q...change... --text "Proof of control {date}" --ledger ledger
+bip322 audit prove bc1q...change...   # -> ~/bip322/treasury/snapshots/<date>-<height>/
 #   sign to_sign/*.psbt on the cosigners' devices, put the results in signed/, then
-bip322 audit finalize ledger/snapshot-<date>-<height>     # valid -> broadcast
+bip322 audit finalize                 # the newest snapshot; valid -> broadcast
 # anything that arrived on addresses not yet proven (deposits):
-bip322 audit -w treasury snapshot --text "Proof of control {date}" --skip-proven ledger
+bip322 audit snapshot --skip-proven
 
 # the year's statement
-bip322 report -w treasury --year 2026 --ledger ledger
-#   -> treasury-2026/treasury-2026.json, .html, .csv (and .pdf with --pdf); -o DIR names both
+bip322 report --year 2026
+#   -> ~/bip322/treasury/statements/2026/: treasury-2026.pdf (or .html), .json, .csv, and the proofs files it cites
 ```
 
+The wallet is `-w NAME`, else `wallet` in `~/bip322/config.toml`, else the
+node's one loaded wallet; `-o DIR` writes the statement elsewhere. The tree
+and the configuration file are described in bip322-audit's README and the
+handbook; the keys this package reads are `wallet`, `cli`, `holder`,
+`dust`, `theme`, `heading`, `explorer`, and `node` per wallet.
+
 `bip322 report` prints a summary on stderr and the directory on stdout. For the
-year, made in January from the year-end bundle:
+year, made in January from the year-end snapshot:
 
 ```
 treasury: 2026  blocks 878000 -> 931234  ref 009ab805de61d672
 opening 1.23400000 BTC  closing 1.03398110 BTC  net -0.20001890 BTC  (3 transactions, fees 0.00001890 BTC)
 reconciliation: ok
 proof coverage: 2/2 closing outputs, 1.03398110 BTC; stamped after the period's end: 2/2
-  bundle 2026-year-end/proofs.json: stamp 931871, signatures 2/2, verified, used for 2
-  other bundles in the ledger, not used: 2
+  proofs treasury-2027-01-08-931871-proofs.json: stamp 931871, signatures 2/2, verified, used for 2
+  other proofs files, not used: 2
 on chain (holdings by UTXO at the block of its proof): 2/2 held when proven
 RESULT: OK
 ```
@@ -99,7 +105,7 @@ ends at the tip the history was read at, a line
 `RESULT: ATTENTION` means the reconciliation failed, a closing UTXO has no
 verified proof, a lookup on the chain contradicts the statement, or the node
 wallet disagrees with the closing UTXOs; the summary and the report say
-which. An uncovered UTXO is fixed by a new bundle with `--skip-proven`.
+which. An uncovered UTXO is fixed by a new snapshot with `--skip-proven`.
 `report` exits 0 when the result is OK, 1 when it is ATTENTION and 2 on an
 error.
 
@@ -110,8 +116,8 @@ bip322 report [--cli CMD] [-w NAME] history [-o history.json]
 bip322 report [--cli CMD]           block WHEN
 bip322 report [--cli CMD] [-w NAME] balance [--at WHEN | --height H] [--history FILE]
 bip322 report [--cli CMD] [-w NAME] (--year Y | --from WHEN --to WHEN | --from-height H --to-height H)
-                                     [--ledger DIR]... [--holder NAME] [--history FILE]
-                                     [--rates CSV | --rate N] [--currency CODE] [--dust SATS [--dust-force]] [--explorer URL] [--pdf] [--theme journal|light|paper|dark] [--heading STYLE] [-o DIR]
+                                     [--snapshots DIR]... [--holder NAME] [--history FILE]
+                                     [--rates CSV | --rate N] [--currency CODE] [--dust SATS [--dust-force]] [--explorer URL] [--html] [--theme journal|light|paper|dark] [--heading STYLE] [-o DIR]
 bip322 report help [COMMAND]
 ```
 
@@ -130,9 +136,10 @@ The statement is the default command (`report` names it explicitly, as in `help 
   report exactly. The period is given one way only. When the end is in the
   past and the node has no block after it yet (still syncing, or behind), the
   closing block is not settled and `report` refuses.
-* `--ledger` takes a directory tree of bundles, one bundle directory or one
-  `proofs.json`, and may repeat. A path that does not exist or holds no
-  bundle is an error, so a mistyped path does not read as "no proofs".
+* The proofs come from the wallet's `snapshots/`. `--snapshots DIR` takes
+  them from elsewhere instead: a directory of snapshots, one snapshot or one
+  proofs file, and may repeat. A path that does not exist or holds no
+  proofs file is an error, so a mistyped path does not read as "no proofs".
 * `--rates date,rate.csv` or `--rate N` with `--currency` adds a fiat value
   per movement (the rate in force is the latest dated row on or before the
   transaction's day). Nothing is fetched; the rates are yours. `--rates`
@@ -176,15 +183,15 @@ The wallet is named by the node wallet's name; `--holder NAME` puts the holder's
   picks how section headings are set: `number` (the number in red), `tab`
   (a red tab over a grey rule), `redrule`, or `underline`.
 * Typefaces: Adobe's Source Serif 4 and Source Sans 3 and JetBrains Mono
-  (SIL Open Font License) are bundled and embedded in the PDF, so the
-  statement looks the same on every machine; `report` copies them to
-  `<out>/fonts/` for the HTML. The commands' output is the finding;
+  (SIL Open Font License) come with the package and are embedded in the PDF,
+  and in the HTML when that is the statement, so it looks the same on every
+  machine and is one file. The commands' output is the finding;
   a badge follows only when something needs saying (INVALID, NO PROOF,
   CONTRADICTED, a proof that predates its UTXO). BIP-322 defines
   the proof for a scriptPubKey ("the key script to be proven"); an address
   is that script encoded, which is why the statement can verify on the
   bytes themselves. A coin that arrived after its proof (a change address
-  proven before the spend) is marked so; the year-end bundle gives it a
+  proven before the spend) is marked so; the year-end snapshot gives it a
   proof dated after it.
 * `--dust SATS`: an output of at most SATS satoshi is dust when others
   paid it to the wallet in a transaction that spends nothing of the
@@ -240,31 +247,32 @@ The wallet is named by the node wallet's name; `--holder NAME` puts the holder's
   Unconfirmed transactions are listed apart and count in no balance;
   abandoned and replaced ones are not listed.
 
-The report names no descriptor, no xpub and no derivation path; the bundles
-it cites carry none either. Bundle names are relative to the ledger, never
-absolute paths: `<bundle dir>/proofs.json` also when `--ledger` is itself a
-bundle directory or a `proofs.json`, with the ledger directory's name in
-front when two ledgers hold bundles of the same name (an error if that
-does not tell them apart). Only the bundles cited on a closing UTXO's page
-are listed; whatever else the ledger holds (another wallet's bundles, older
-ones) appears as a bare count.
+The report names no descriptor, no xpub and no derivation path; the proofs
+files it cites carry none either. A proofs file is cited by its own name,
+`<wallet>-<date>-<height>-proofs.json`, never by a path; a file still named
+`proofs.json` (earlier versions) is named after its snapshot directory, and
+two files that would share a name are an error. Only the proofs files cited
+on a closing UTXO's page are listed; whatever else the wallet's snapshots
+hold (older ones, another wallet's given with `--snapshots`) appears as a
+bare count.
 
-**What to hand over:** the report directory. Besides the HTML, JSON and
-CSV (and the PDF), all named after the directory, it holds `ledger/` with
-a copy of each `proofs.json` the statement cites, and no other, under the
-name the report uses, so a reader can run `bip322 audit verify` on each.
-Never hand over the ledger itself: the bundles' PSBT files carry the
-wallet's xpubs. `--no-proofs` skips the copy.
+**What to hand over:** the statement directory,
+`~/bip322/<wallet>/statements/<label>/`. Four kinds of file and nothing
+else: `<wallet>-<label>.pdf` (or `.html`), `.json`, `.csv`, and a copy of
+each proofs file the statement cites, and no other, under its own name, so
+a reader can run `bip322 audit verify` on each. Never hand over the
+snapshots: their PSBT files carry the wallet's xpubs. `--no-proofs` skips
+the copy.
 
 ## Layout
 
 ```
 bip322report/history.py    the node wallet's transactions; coins and balance at any height
 bip322report/period.py     a period resolved to block heights
-bip322report/coverage.py   the ledger's bundles, re-verified; which proof backs which coin
+bip322report/coverage.py   the wallet's proofs files, re-verified; which proof backs which coin
 bip322report/fiat.py       optional valuation from user-supplied rates
 bip322report/report.py     the report as data, and the text summary
-bip322report/render.py     HTML (Jinja2 template), CSV, PDF (WeasyPrint), themes, bundled fonts
+bip322report/render.py     HTML (Jinja2 template), CSV, PDF (WeasyPrint), themes, the fonts
 bip322report/cli.py        the bip322-report command
 tests/                      a fake node covering both packages' RPCs; an end-to-end test on regtest Core
 examples/report_walkthrough.sh   the flow on a throwaway regtest node, into a fresh directory (or a new or empty DIR)

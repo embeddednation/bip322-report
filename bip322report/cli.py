@@ -1,4 +1,10 @@
-"""``bip322-report``: the statement of a period, backed by verified BIP-322 proofs, from the owner's node wallet."""
+"""``bip322-report``: the statement of a period, backed by verified BIP-322 proofs, from the owner's node wallet.
+
+The statement goes to ``~/bip322/<wallet>/statements/<label>/`` (``BIP322_DIR`` moves the tree) as
+``<wallet>-<label>.pdf`` (``.html`` where the PDF cannot be made), ``.json``, ``.csv``, and a copy of
+each proofs file it cites; the proofs come from ``~/bip322/<wallet>/snapshots/``.  ``-w`` names the
+wallet, else ``config.toml`` does, else the node's one loaded wallet is it.
+"""
 
 from __future__ import annotations
 
@@ -9,22 +15,24 @@ import sys
 from pathlib import Path
 
 from bip322audit.audit import AuditError
-from bip322audit.ledger import find_proofs
+from bip322audit.datadir import Config, ConfigError, data_dir, snapshots_dir, statements_dir
+from bip322audit.proofs import find_proofs
 from bip322audit.rpc import BitcoinCli, RpcError, btc
 from bip322core._version import SPEC
 from bip322core.cli import CLIError, add_help_command, emit
 from bip322core.core import BIP322Error
 
 from . import TOOL
-from .coverage import bundle_names, pending_bundles
+from .coverage import pending_snapshots, proofs_names
 from .fiat import Rates
 from .history import History, fetch_history
 from .period import Period, block, last_block_before, parse_when, period_between, period_for_heights, period_for_year
-from .render import HEADINGS, copy_fonts, render_html, write_csv, write_pdf
+from .render import HEADINGS, PACKAGE_FONTS, THEMES, render_html, write_csv, write_pdf
 from .report import build_report, format_summary
 
 EXPLORER = "https://mempool.space"  # mainnet only: on another chain its links would lead to the wrong transactions
 DUST_MAX = 10_000  # satoshi; a higher --dust would leave real coins out of the statement, so it needs --dust-force
+DEFAULT_THEME = "journal"
 
 
 def _opt(args, name: str):
@@ -32,18 +40,33 @@ def _opt(args, name: str):
     return getattr(args, f"{name}_sub", None) or getattr(args, name, None)
 
 
-def _cli(args) -> BitcoinCli:
-    cli = BitcoinCli(_opt(args, "cli") or "bitcoin-cli")
-    wallet = _opt(args, "wallet")
-    if wallet:
-        cli.argv.append(f"-rpcwallet={wallet}")
+def _wallet_name(args, config: Config) -> str | None:
+    """The wallet as named by the owner: ``-w``, else ``wallet`` in config.toml; None when neither says."""
+    given = _opt(args, "wallet")
+    if given:
+        return str(given)
+    named = config.get("wallet")
+    return str(named) if named is not None else None
+
+
+def _cli(args, config: Config, wallet: str | None) -> BitcoinCli:
+    """The node as the options and config.toml describe it, on the wallet's node wallet when one is named."""
+    cli = BitcoinCli(_opt(args, "cli") or config.get("cli", wallet) or "bitcoin-cli")
+    if wallet is not None:
+        cli.argv.append(f"-rpcwallet={config.node_wallet(wallet)}")
     return cli
+
+
+def _setting(args, config: Config, name: str, key: str, wallet: str | None, default=None):
+    """An option's value: the command line, else config.toml (the wallet's table, then the top level), else ``default``."""
+    given = getattr(args, name, None)
+    return given if given is not None else config.get(key, wallet, default)
 
 
 def _add_node_args(p: argparse.ArgumentParser, wallet: bool = True) -> None:
     p.add_argument("--cli", dest="cli_sub", metavar="CMD", help="how to reach the node (may also be given before the command)")
     if wallet:
-        p.add_argument("--wallet", "-w", dest="wallet_sub", metavar="NAME", help="the node wallet (may also be given before the command)")
+        p.add_argument("--wallet", "-w", dest="wallet_sub", metavar="NAME", help="the wallet (may also be given before the command)")
 
 
 def _progress(line: str) -> None:
@@ -86,20 +109,22 @@ def _period_label(args) -> str:
     return f"{args.from_height}..{args.to_height}"
 
 
-def _ledger_roots(args) -> list[Path]:
-    """The --ledger paths, each holding a bundle: a mistyped path must not look like a wallet without proofs."""
-    roots = [Path(p) for p in (args.ledger or [])]
-    for root in roots:
-        if not root.exists():
-            raise CLIError(f"--ledger {root}: no such file or directory")
-        if not find_proofs([root]) and not pending_bundles([root]):  # snapshots awaiting signatures are a ledger too
-            raise CLIError(f"--ledger {root}: no proofs.json in it")
-    bundle_names([path for path, _ in find_proofs(roots)], roots)  # refuses two bundles under one name before any work
+def _proofs_roots(args, wallet: str | None) -> list[Path]:
+    """Where the proofs come from: the --snapshots paths, each holding a snapshot, or the wallet's own snapshots directory.
+
+    A mistyped --snapshots path must not look like a wallet without proofs.
+    """
+    if args.snapshots:
+        roots = [Path(p) for p in args.snapshots]
+        for root in roots:
+            if not root.exists():
+                raise CLIError(f"--snapshots {root}: no such file or directory")
+            if not find_proofs([root]) and not pending_snapshots([root]):  # snapshots awaiting signatures count
+                raise CLIError(f"--snapshots {root}: no proofs file in it")
+    else:
+        roots = [snapshots_dir(wallet)] if wallet is not None and snapshots_dir(wallet).is_dir() else []
+    proofs_names([path for path, _ in find_proofs(roots)])  # refuses two files under one name before any work
     return roots
-
-
-def _default_directory(wallet: str | None, period_label: str) -> Path:
-    return Path(f"{wallet or 'wallet'}-{period_label}".replace(" ", "_").replace("/", "_"))
 
 
 def _check_directory(directory: Path, force: bool) -> None:
@@ -109,11 +134,18 @@ def _check_directory(directory: Path, force: bool) -> None:
         raise CLIError(f"{directory} exists and is not empty (use --force to overwrite)")
 
 
-def _need_weasyprint() -> None:
+def _pdf_possible() -> bool:
+    """WeasyPrint and its system libraries are there: the statement can be a PDF."""
     try:
         import weasyprint  # noqa: F401
-    except Exception as exc:  # ImportError, or an OSError when its system libraries (Pango) are missing
-        raise CLIError(f"--pdf needs WeasyPrint and its system libraries: ./setup.sh --pdf (see the README) [{exc}]") from exc
+    except Exception:  # ImportError, or an OSError when its system libraries (Pango) are missing
+        return False
+    return True
+
+
+def _file_stem(wallet: str, period_label: str) -> str:
+    """``<wallet>-<label>``: the name the statement's files carry wherever they end up."""
+    return f"{wallet}-{period_label}".replace(" ", "_").replace("/", "_")
 
 
 # --------------------------------------------------------------------------- #
@@ -122,14 +154,15 @@ def _need_weasyprint() -> None:
 
 
 def cmd_block(args) -> int:
-    cli = _cli(args)
+    cli = _cli(args, Config.load(), None)
     found = last_block_before(cli, parse_when(args.when))
     emit(json.dumps(found.to_dict(), indent=2), args.output)
     return 0
 
 
 def cmd_history(args) -> int:
-    history = fetch_history(_cli(args), progress=_progress)
+    config = Config.load()
+    history = fetch_history(_cli(args, config, _wallet_name(args, config)), progress=_progress)
     emit(json.dumps(history.to_dict(), indent=2), args.output)
     print(
         json.dumps(
@@ -147,7 +180,8 @@ def cmd_history(args) -> int:
 
 
 def cmd_balance(args) -> int:
-    cli = _cli(args)
+    config = Config.load()
+    cli = _cli(args, config, _wallet_name(args, config))
     history = _history(args, cli)
     if args.height is not None:
         at = block(cli, args.height) if not args.history else None
@@ -186,28 +220,35 @@ def _rates(args) -> Rates | None:
     return None
 
 
-def _check_dust(args) -> None:
-    if args.dust < 0:
+def _dust(args, config: Config, wallet: str | None) -> int:
+    dust = _setting(args, config, "dust", "dust", wallet, 0)
+    if not isinstance(dust, int) or isinstance(dust, bool):
+        raise CLIError(f"dust must be a number of satoshi, not {dust!r}")
+    if dust < 0:
         raise CLIError("--dust: a threshold cannot be negative")
-    if args.dust > DUST_MAX and not args.dust_force:
-        raise CLIError(
-            f"--dust {args.dust}: more than {DUST_MAX} satoshi is not dust (--dust-force to leave such outputs out all the same)"
-        )
+    if dust > DUST_MAX and not args.dust_force:
+        raise CLIError(f"--dust {dust}: more than {DUST_MAX} satoshi is not dust (--dust-force to leave such outputs out all the same)")
+    return dust
 
 
-def _report_history(args, cli: BitcoinCli, period_label: str) -> tuple[History, Path]:
-    """The history the statement is made from, checked against the node, and the directory the statement goes to."""
+def _report_history(args, cli: BitcoinCli, config: Config, wallet: str | None, period_label: str) -> tuple[History, str, Path]:
+    """The history the statement is made from, checked against the node; the wallet's name; and the directory the statement goes to."""
     if not args.output and not args.history:
         # the default directory is named after the wallet: one call to learn the name before the long read of its history
-        with contextlib.suppress(RpcError, KeyError, TypeError):  # no wallet: fetch_history says so better
-            _check_directory(_default_directory(_opt(args, "wallet") or cli.call("getwalletinfo")["walletname"], period_label), args.force)
+        with contextlib.suppress(RpcError, KeyError, TypeError, ConfigError):  # no wallet: fetch_history says so better
+            early = wallet or config.wallet_of_node(str(cli.call("getwalletinfo")["walletname"]))
+            _check_directory(statements_dir(early) / period_label, args.force)
     history = _history(args, cli)
-    directory = Path(args.output) if args.output else _default_directory(history.wallet, period_label)
+    if wallet is None and history.wallet is not None:
+        wallet = config.wallet_of_node(str(history.wallet))
+    if wallet is None:
+        raise CLIError("no wallet name for the statement: -w NAME (or wallet = NAME in config.toml)")
+    directory = Path(args.output) if args.output else statements_dir(wallet) / period_label
     _check_directory(directory, args.force)
     _check_history(cli, history, args.history or "the history")
     if history.wallet and not any(a.startswith("-rpcwallet=") for a in cli.argv):
         cli.argv.append(f"-rpcwallet={history.wallet}")  # a cached history knows its wallet; the node cross-check needs it
-    return history, directory
+    return history, wallet, directory
 
 
 def _period(args, cli: BitcoinCli, history: History, period_label: str) -> Period:
@@ -224,65 +265,67 @@ def _period(args, cli: BitcoinCli, history: History, period_label: str) -> Perio
     return period
 
 
-def _write_statement(args, report: dict, directory: Path, chain: str) -> str:
-    """The statement's JSON, HTML (with its fonts) and CSV, named after their directory; returns the HTML, which the PDF is made from."""
-    directory.mkdir(parents=True, exist_ok=True)
-    name = directory.resolve().name  # the files are named after their directory: treasury-2026/treasury-2026.pdf
-    report["name"] = name
-    (directory / f"{name}.json").write_text(json.dumps(report, indent=2, default=str) + "\n")
-    explorer = args.explorer if args.explorer is not None else (EXPLORER if chain == "main" else None)
-    html = render_html(report, explorer=explorer, theme=args.theme, heading=args.heading)
-    (directory / f"{name}.html").write_text(html)
-    copy_fonts(directory)
-    write_csv(report, directory / f"{name}.csv")
-    return html
-
-
 def _copy_proofs(report: dict, roots: list[Path], directory: Path) -> None:
-    """What the reader needs next to the report: the proofs.json of each bundle the statement cites, under the name it uses.
+    """What the reader needs next to the statement: each proofs file it cites, under its own name.
 
-    Never the bundle directories themselves (their PSBTs carry the wallet's xpubs), nor a bundle the statement does not rely on.
+    Never the snapshot directories themselves (their PSBTs carry the wallet's xpubs), nor a proofs file the statement does not rely on.
     """
-    cited = {b["bundle"] for b in report["bundles"]}
-    for path, bundle in bundle_names([path for path, _ in find_proofs(roots)], roots).items():
-        if bundle in cited:
-            target = directory / "ledger" / bundle
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(path.read_bytes())
+    cited = {f["file"] for f in report["proofs_files"]}
+    for path, name in proofs_names([path for path, _ in find_proofs(roots)]).items():
+        if name in cited:
+            (directory / name).write_bytes(path.read_bytes())
 
 
 def cmd_report(args) -> int:
     # what can be refused without the node is refused first: nothing is read, verified or written for a command that cannot finish
     period_label = _period_label(args)
-    _check_dust(args)
+    config = Config.load()
+    wallet = _wallet_name(args, config)
+    dust = _dust(args, config, wallet)
     rates = _rates(args)
-    roots = _ledger_roots(args)
-    if args.pdf:
-        _need_weasyprint()
+    theme = str(_setting(args, config, "theme", "theme", wallet, DEFAULT_THEME))
+    if theme not in THEMES:
+        raise CLIError(f"theme {theme!r} is not one of {', '.join(THEMES)}")
+    pdf = not args.html and _pdf_possible()
+    roots = _proofs_roots(args, wallet) if args.snapshots else None  # a given path is checked before any work
     if args.output:
         _check_directory(Path(args.output), args.force)
 
-    cli = _cli(args)
-    history, directory = _report_history(args, cli, period_label)
+    cli = _cli(args, config, wallet)
+    history, wallet, directory = _report_history(args, cli, config, wallet, period_label)
+    if roots is None:
+        roots = _proofs_roots(args, wallet)
     period = _period(args, cli, history, period_label)
     report = build_report(
         history,
         period,
-        label=history.wallet or "wallet",
-        holder=args.holder,
-        ledger_roots=roots,
+        label=wallet,
+        holder=_setting(args, config, "holder", "holder", wallet),
+        proofs_roots=roots,
         cli=cli,
         rates=rates,
         engines=args.engines.split(",") if args.engines else None,
         progress=_progress,
-        dust_sat=args.dust,
+        dust_sat=dust,
     )
-    html = _write_statement(args, report, directory, history.chain)
+    stem = _file_stem(wallet, period_label)
+    report["name"] = stem
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{stem}.json").write_text(json.dumps(report, indent=2, default=str) + "\n")
+    write_csv(report, directory / f"{stem}.csv")
     if not args.no_proofs and roots:
         _copy_proofs(report, roots, directory)
     print(format_summary(report), file=sys.stderr)
-    if args.pdf:
-        write_pdf(html, directory / f"{report['name']}.pdf")  # last: should it fail, everything else is in place
+    explorer = _setting(args, config, "explorer", "explorer", wallet)
+    if explorer is None:
+        explorer = EXPLORER if history.chain == "main" else None
+    heading = _setting(args, config, "heading", "heading", wallet)
+    if pdf:  # last: should the rendering fail, everything else is in place
+        write_pdf(render_html(report, explorer=explorer, theme=theme, heading=heading, fonts_url=PACKAGE_FONTS), directory / f"{stem}.pdf")
+    else:
+        if not args.html:
+            print(f"no PDF (WeasyPrint is not installed or lacks Pango): the statement is {stem}.html", file=sys.stderr)
+        (directory / f"{stem}.html").write_text(render_html(report, explorer=explorer, theme=theme, heading=heading))
     print(str(directory))
     return 0 if report["ok"] else 1
 
@@ -298,19 +341,25 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "The statement of a period: holdings and movements in which every coin is backed by a verified BIP-322 proof of "
             f"control, from the owner's node wallet ({SPEC}). With no command the statement is made: "
-            "bip322-report [--cli CMD] [-w NAME] (--year Y | --from WHEN --to WHEN | --from-height H --to-height H) [options]."
+            "bip322-report [--cli CMD] [-w NAME] (--year Y | --from WHEN --to WHEN | --from-height H --to-height H) [options]. "
+            f"It goes to {data_dir()}/<wallet>/statements/<label>/ and its proofs come from {data_dir()}/<wallet>/snapshots/ "
+            "(BIP322_DIR moves the tree); config.toml there holds the defaults."
         ),
     )
     parser.add_argument("--version", action="version", version=f"{TOOL} ({SPEC})")
     parser.add_argument(
-        "--cli", default=None, metavar="CMD", help='how to reach the node, e.g. "bitcoin-cli -signet" (default: bitcoin-cli)'
+        "--cli",
+        default=None,
+        metavar="CMD",
+        help='how to reach the node, e.g. "bitcoin-cli -signet" (default: bitcoin-cli, or cli in config.toml)',
     )
     parser.add_argument(
         "--wallet",
         "-w",
         default=None,
         metavar="NAME",
-        help="the node wallet (bitcoin-cli -rpcwallet=NAME); required when several are loaded",
+        help=f"the wallet: its directory {data_dir()}/NAME, and the node wallet of that name (or the one its [wallets.NAME] table "
+        "names as node). Default: wallet in config.toml, else the node's one loaded wallet",
     )
     sub = parser.add_subparsers(dest="command", metavar="command")
     sub.required = True
@@ -353,11 +402,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "report",
-        help="the statement for a period, as DIR/DIR.json, .html, .csv (and .pdf), DIR being the output directory; the default command",
+        help="the statement for a period: <wallet>-<label>.pdf (or .html), .json, .csv and the proofs files it cites, "
+        "under the wallet's statements/<label>/; the default command",
         description=(
             "Opening and closing balances, every movement between them, a reconciliation, and for each closing output the BIP-322 proof of "
-            "control from the ledger that lists it, re-verified against the node now. The period is a calendar year, two instants, or two "
+            "control, from the wallet's snapshots, that lists it, re-verified against the node now. The period is a calendar year, two instants, or two "
             "heights; opening figures are as of the start block, closing figures as of the end block. "
+            f"The files go to {data_dir()}/<wallet>/statements/<label>/, named <wallet>-<label>.pdf (.html where WeasyPrint is not "
+            "installed, or with --html), .json, .csv, and a copy of each proofs file the statement cites, under its own name. "
             "Exit status: 0 when the result is OK, 1 when it is ATTENTION, 2 on an error."
         ),
     )
@@ -368,22 +420,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--from-height", type=int, metavar="H", help="opening block height; with --to-height")
     p.add_argument("--to-height", type=int, metavar="H", help="closing block height")
     p.add_argument(
-        "--ledger",
-        "-l",
+        "--snapshots",
         metavar="DIR",
         action="append",
-        help="directory tree of bip322-audit bundles (proofs.json), one bundle directory or one proofs.json; may repeat",
+        help="take the proofs from here instead of the wallet's snapshots/: a directory of snapshots, one snapshot, or one proofs file; may repeat",
     )
-    p.add_argument("--holder", metavar="NAME", help="the holder of the wallet, as named in the statement's header (optional)")
+    p.add_argument(
+        "--holder", metavar="NAME", help="the holder of the wallet, as named in the statement's header (default: holder in config.toml)"
+    )
     p.add_argument(
         "--dust",
         metavar="SATS",
         type=int,
-        default=0,
+        default=None,
         help=(
             "outputs of at most SATS satoshi received from others, in a transaction that spends nothing of the wallet's, "
             "and not spent by the closing block are dust: "
-            "left out of every figure, and listed in the JSON; the wallet's own change and consolidations never are (default: none)"
+            "left out of every figure, and listed in the JSON; the wallet's own change and consolidations never are "
+            "(default: dust in config.toml, else none)"
         ),
     )
     p.add_argument("--dust-force", action="store_true", help=f"accept a --dust above {DUST_MAX} satoshi")
@@ -395,35 +449,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--explorer",
         default=None,
         metavar="URL",
-        help=f"block explorer for links in the HTML and PDF; '' for no links (default {EXPLORER} on mainnet, none on other chains)",
+        help=f"block explorer for links in the statement; '' for no links (default: explorer in config.toml, else {EXPLORER} on mainnet, none on other chains)",
     )
-    p.add_argument("--pdf", action="store_true", help="also write the PDF (needs WeasyPrint: ./setup.sh --pdf)")
+    p.add_argument("--html", action="store_true", help="write the statement as one HTML file instead of the PDF")
     p.add_argument(
         "--theme",
-        choices=("journal", "light", "paper", "dark"),
-        default="journal",
-        help="page colours: a warm canvas with serif text (journal), Solarized light, white paper or Solarized dark (default %(default)s)",
+        choices=tuple(THEMES),
+        default=None,
+        help=f"page colours: a warm canvas with serif text (journal), Solarized light, white paper or Solarized dark (default: theme in config.toml, else {DEFAULT_THEME})",
     )
     p.add_argument(
         "--heading",
         choices=HEADINGS,
         help="section headings: coloured text over a rule (underline), a red tab over a grey rule (tab), the number in red (number), a thin red rule (redrule); default per theme",
     )
-    p.add_argument(
-        "--no-proofs", action="store_true", help="do not copy the proofs.json files the statement cites into <DIR>/ledger/ next to it"
-    )
+    p.add_argument("--no-proofs", action="store_true", help="do not copy the proofs files the statement cites next to it")
     p.add_argument("--engines", default=None, help="comma separated bip322 engines for re-verifying the proofs (default: all installed)")
-    p.add_argument(
-        "--output", "-o", metavar="DIR", help="report directory (default <label>-<period>, the label being the node wallet's name)"
-    )
+    p.add_argument("--output", "-o", metavar="DIR", help="write the statement here instead of under the wallet's statements/")
     p.add_argument("--force", action="store_true", help="write into a non-empty directory")
     p.set_defaults(
         func=cmd_report,
         examples=[
-            "-w treasury report --year 2026 --ledger ledger",
-            "-w treasury --year 2026 --ledger ledger --dust 1000 --pdf -o treasury-2026",
-            "-w treasury --from 2026-01-01 --to 2026-07-01 --ledger ledger --rates sek.csv --currency SEK",
-            "--history history.json --from-height 900000 --to-height 912345 --ledger ledger -o q3",
+            "--year 2026",
+            "-w treasury --year 2026 --dust 1000",
+            "-w treasury --from 2026-01-01 --to 2026-07-01 --rates sek.csv --currency SEK",
+            "--history history.json --from-height 900000 --to-height 912345 --snapshots DIR -o q3",
         ],
     )
 
@@ -470,7 +520,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(with_default_command(sys.argv[1:] if argv is None else list(argv)))
     try:
         return args.func(args)
-    except (CLIError, BIP322Error, RpcError, AuditError, ValueError, RuntimeError) as exc:
+    except (CLIError, ConfigError, BIP322Error, RpcError, AuditError, ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except OSError as exc:

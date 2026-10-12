@@ -9,10 +9,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from bip322audit.audit import finalize_bundle
-from bip322audit.ledger import proven_addresses
+from bip322audit.audit import finalize_snapshot
+from bip322audit.proofs import proven_addresses
 from bip322audit.rpc import BitcoinCli
-from bip322audit.snapshot import take_snapshot, write_bundle
+from bip322audit.snapshot import take_snapshot, write_snapshot
 from bip322audit.testing import Node, find_bitcoin_core
 from bip322core.dev.signing import sign_psbt
 from bip322core.dev.testing import ORIGIN_PATH
@@ -70,14 +70,14 @@ def private_descriptors(masters):
 
 def _bundle(directory: Path, watch: BitcoinCli, wallet: Wallet, signers, template: str, skip=None, addresses=None) -> dict:
     snapshot, psbts = take_snapshot(watch, wallet, template, depth=1, skip_addresses=skip, addresses=addresses)
-    write_bundle(directory, snapshot, psbts)
+    write_snapshot(directory, snapshot, psbts)
     for entry in snapshot.addresses:
         psbt = parse_psbt((directory / entry["file"]).read_text())
         for signer in signers[:2]:
             assert sign_psbt(psbt, signer) == 1
         (directory / "signed" / Path(entry["file"]).name.replace(".psbt", "-part.psbt")).write_text(psbt.to_string())
-    document = finalize_bundle(directory, cli=watch)
-    (directory / "proofs.json").write_text(json.dumps(document, indent=2))
+    document = finalize_snapshot(directory, cli=watch)
+    (directory / f"{directory.name}-proofs.json").write_text(json.dumps(document, indent=2))  # named by the test: one stamp, many files
     return document
 
 
@@ -126,17 +126,17 @@ def test_reports_workflow_on_regtest(core, regtest_wallet, signer_expressions, p
     )
     period = period_for_year(watch, YEAR)  # regtest genesis is 2011; the year has not ended, so the period runs to the tip
     assert period.start.height == 0 and period.end.height == 105 and period.to_tip
-    report = build_report(history, period, label="regtest", ledger_roots=[ledger], cli=watch)
+    report = build_report(history, period, label="regtest", proofs_roots=[ledger], cli=watch)
     assert report["ok"], json.dumps(report["coverage"], indent=2) + json.dumps(report["node_check"])
     assert report["opening"]["total_sat"] == 0 and report["closing"]["total_sat"] == history.balance_at(105)
     assert report["totals"]["received_sat"] == 60_000_000 and report["totals"]["fees_sat"] == spend.fee_sat
     assert report["totals"]["sent_sat"] == 20_000_000 - spend.fee_sat  # the fee was taken from the 0.2 sent
     closing = history.coins_at(105)  # Core's coin selection decides whether the 0.1 output survives the spend
     assert report["coverage"]["complete"] and report["coverage"]["total_count"] == len(closing) in (1, 2)
-    used = {b["bundle"].split("/")[0]: b["used_for"] for b in report["bundles"]}
+    used = {f["file"].removesuffix("-proofs.json"): f["used_for"] for f in report["proofs_files"]}
     relied_on = {"snapshot-first": len(closing) - 1, "snapshot-change": 1}  # a bundle no closing UTXO relies on is not listed, only counted
-    assert used == {k: n for k, n in relied_on.items() if n} and report["bundles_not_used"] == 2 - len(used)
-    assert all(b["verified"] for b in report["bundles"])
+    assert used == {k: n for k, n in relied_on.items() if n} and report["proofs_files_not_used"] == 2 - len(used)
+    assert all(b["verified"] for b in report["proofs_files"])
     change_row = next(c for c in report["closing"]["coins"] if c["address"] == change)
     assert change_row["proof"]["before_output"] and not change_row["proof"]["lists_output"]
     assert report["node_check"]["ok"] and report["reconciliation"]["ok"]
@@ -144,7 +144,7 @@ def test_reports_workflow_on_regtest(core, regtest_wallet, signer_expressions, p
     assert "pill bad" not in html and spend_txid in html
 
     # ---- a sub-period: only the spend, opening balance from before it ----------- #
-    part = build_report(history, period_for_heights(watch, 103, 105), label="regtest", ledger_roots=[ledger], cli=watch)
+    part = build_report(history, period_for_heights(watch, 103, 105), label="regtest", proofs_roots=[ledger], cli=watch)
     assert part["opening"]["total_sat"] == 60_000_000 and len(part["transactions"]) == 1 and part["ok"]
 
     # ---- the CLI, driving the same node through bitcoin-cli ------------------- #
@@ -152,6 +152,11 @@ def test_reports_workflow_on_regtest(core, regtest_wallet, signer_expressions, p
 
     cli_arg = " ".join(core.cli_argv())
     out = tmp_path / "report"
-    assert cli_module.main(["--cli", cli_arg, "-w", "watch", "report", "--year", str(YEAR), "--ledger", str(ledger), "-o", str(out)]) == 0
-    written = json.loads((out / "report.json").read_text())
-    assert written["ok"] and written["label"] == "watch" and (out / "report.html").exists() and (out / "report.csv").exists()
+    assert (
+        cli_module.main(
+            ["--cli", cli_arg, "-w", "watch", "report", "--year", str(YEAR), "--snapshots", str(ledger), "--html", "-o", str(out)]
+        )
+        == 0
+    )
+    written = json.loads((out / f"watch-{YEAR}.json").read_text())
+    assert written["ok"] and written["label"] == "watch" and (out / f"watch-{YEAR}.html").exists() and (out / f"watch-{YEAR}.csv").exists()

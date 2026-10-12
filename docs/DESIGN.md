@@ -48,7 +48,7 @@ deliberately does not do. The proofs themselves are bip322-audit's business
   before it. Dust the wallet does spend is booked in the block that spends
   it, as a movement of kind `swept` standing right before the spending
   transaction, which is itself unchanged: every amount and fee stays exact.
-* **Coverage.** A closing coin is covered when a verified bundle carries a
+* **Coverage.** A closing coin is covered when a verified proofs file carries a
   proof for its address: every signature valid, the stamp block in the main
   chain, no listed output contradicted by the node. A BIP-322 proof is about
   the script behind an address, so it covers every output paid there, before
@@ -72,7 +72,7 @@ deliberately does not do. The proofs themselves are bip322-audit's business
   stamped after it, and each page names its proof's block.
 * **The reference.** A hash of the facts stated: label, chain, the two
   blocks, the opening and closing coins, the movements (with their valuation
-  when rates are given), and for each closing UTXO the bundle, address and
+  when rates are given), and for each closing UTXO the proofs file, address and
   signature of its proof. Nothing that changes
   between two runs over the same facts (the tip, command output, the time
   of preparation) enters it.
@@ -91,22 +91,33 @@ first block opens on block 0. A cached history is used only against the
 chain it was read from: same network, its tip block still in the node's
 chain.
 
-## Why a ledger and not a database
+## Why files in a tree and not a database
 
 A database of balance snapshots and signatures, from which a report picks
 the latest snapshot before a date, is only as fresh as the last snapshot
 taken. Here the history is recomputed from the
 node every time, or reproduced from a cached `history.json`, and the record
-of proofs is the ledger: bip322-audit's bundles on disk, each self-contained
-and independently verifiable. There is nothing else to keep in sync.
+of proofs is the wallet's snapshots: bip322-audit's directories on disk, each
+with its proofs file, self-contained and independently verifiable. There is
+nothing else to keep in sync.
+
+The tree is `~/bip322/<wallet>/`, shared with bip322-audit: `snapshots/`
+is read, `statements/<label>/` is written. A directory is named for its
+place and stays bare; a file that leaves the tree is named for its life,
+`<wallet>-<label>.pdf` and `<wallet>-<date>-<height>-proofs.json`, so the
+statement's files and the proofs files it copies beside itself say what they
+are on any disk. The statement is one document, the PDF when WeasyPrint is
+there and otherwise an HTML file with the fonts embedded, plus the JSON (the
+record the PDF was rendered from, which the reference hashes) and the CSV
+(the movements for a spreadsheet); nothing else, no subdirectory.
 
 ## What is left out on purpose
 
 * No descriptor, xpub or derivation path anywhere in the output: the report
-  names addresses and outputs, like the bundles do.
-* Nothing about the rest of the ledger: only the bundles cited on a closing
-  UTXO's page are named and copied next to the statement; the others are a
-  bare count.
+  names addresses and outputs, like the proofs files do.
+* Nothing about the rest of the wallet's snapshots: only the proofs files
+  cited on a closing UTXO's page are named and copied next to the statement;
+  the others are a bare count.
 * No links to a third party except on mainnet, where transactions and
   scripts link to a block explorer unless `--explorer ''` says otherwise.
 * No fetched prices: a fiat valuation uses only rates the user supplies.
@@ -117,9 +128,9 @@ and independently verifiable. There is nothing else to keep in sync.
 ## Trust
 
 Owner-side tooling: it needs the node wallet (watch-only is enough) and reads
-the ledger. What it hands to a reader, the report and the bundles, is
-checkable on any node with the chain and no wallet: `bip322 audit verify` for
-the bundles, `gettxout` and the transactions by txid for the balances and
+the wallet's snapshots. What it hands to a reader, the report and the proofs
+files, is checkable on any node with the chain and no wallet: `bip322 audit
+verify` for the proofs files, `gettxout` and the transactions by txid for the balances and
 movements. The statement's notes name the files that come with it and the
 command that checks a proofs file; the commands on the UTXO pages paste as
 they stand.

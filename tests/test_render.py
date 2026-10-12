@@ -8,10 +8,10 @@ import pytest
 from test_report import _bundle, _node
 
 import bip322report
-from bip322report.cli import build_parser
+from bip322report.cli import DEFAULT_THEME, build_parser
 from bip322report.history import fetch_history
 from bip322report.period import period_for_heights
-from bip322report.render import MONO, SANS, THEMES, VALUE_ROLES, render_html
+from bip322report.render import MONO, PACKAGE_FONTS, SANS, THEMES, VALUE_ROLES, render_html
 from bip322report.report import build_report
 
 
@@ -22,7 +22,7 @@ def _report(tmp_path, wallet, signers, template="Owner proof {date}", ledger=Tru
         _bundle(tmp_path / "ledger" / "snapshot-1", node, wallet, signers, template)
     roots = [tmp_path / "ledger"] if ledger else []
     period = period_for_heights(node, 985, 1000, label="test")
-    return build_report(fetch_history(node), period, label="Treasury", ledger_roots=roots, cli=node)
+    return build_report(fetch_history(node), period, label="Treasury", proofs_roots=roots, cli=node)
 
 
 class _Figure(HTMLParser):
@@ -63,7 +63,9 @@ def _figure(html: str) -> _Figure:
 
 def test_the_default_theme_is_journal_and_no_publication_is_named():
     assert list(THEMES) == ["paper", "light", "dark", "journal"]
-    assert build_parser().parse_args(["report", "--year", "2026"]).theme == "journal"
+    assert (
+        build_parser().parse_args(["report", "--year", "2026"]).theme is None and DEFAULT_THEME == "journal"
+    )  # config.toml may say otherwise
     assert all(build_parser().parse_args(["report", "--year", "2026", "--theme", name]).theme == name for name in THEMES)
     # the earlier name and palette words, spelled in halves so that this file passes its own check
     halves = "econ/omist mar/ber lon/don chi/cago hong/kong singa/pore shang/hai to/kyo los/angeles new/york"
@@ -133,3 +135,12 @@ def test_value_colours_of_the_default_theme_carry_small_text():
     for role in VALUE_ROLES:
         assert _contrast(t[role], t["bg"]) >= 4.5, (role, t[role])
     assert len({t[role] for role in VALUE_ROLES}) == len(VALUE_ROLES)  # one value, one colour
+
+
+def test_fonts_are_embedded_in_the_html_and_read_from_the_package_for_the_pdf(tmp_path, wallet, signer_expressions):
+    """The HTML is one file that travels; the PDF is rendered here, from the fonts as installed. Nothing is copied beside a statement."""
+    report = _report(tmp_path, wallet, signer_expressions, ledger=False)
+    html = render_html(report)
+    assert html.count('src: url("data:font/woff2;base64,') == 10 and "fonts/" not in html and "SIL Open Font License" in html
+    for_pdf = render_html(report, fonts_url=PACKAGE_FONTS)
+    assert for_pdf.count('src: url("file://') == 10 and "data:font" not in for_pdf and len(for_pdf) < len(html) / 4

@@ -4,7 +4,7 @@ What the holder does, what the auditor does, and what the pieces are. The
 command references are the three READMEs ([bip322-core](https://github.com/embeddednation/bip322-core),
 [bip322-audit](https://github.com/embeddednation/bip322-audit),
 [bip322-report](https://github.com/embeddednation/bip322-report)); this is the flow. `bip322 report handbook` prints this file. The holder's
-side of it, from the first bundle to the statements (one of them with
+side of it, from the first snapshot to the statements (one of them with
 `--dust`), is exercised by `examples/report_walkthrough.sh` on a throwaway
 regtest node; it writes into a fresh directory, or into a new or empty one
 given as its argument.
@@ -23,21 +23,64 @@ given as its argument.
   the block it names. Control of a scriptPubKey covers every UTXO locked to
   it, before or after the proof; a UTXO that arrived after the proof is
   covered only by a later proof.
-* **A bundle** is one round of proofs: `bip322 audit snapshot` or `prove`
-  writes `snapshot.json`, `message.txt` and `to_sign/to_sign-NN.psbt` (one
-  per address); the signers fill `signed/`; `finalize` writes
-  `proofs.json`, the only file an auditor needs from it. `proofs.json`
-  names addresses, proofs and outputs, and the policy (`2 of 3`); it carries
-  no descriptor, xpub, derivation path or wallet name.
-* **The ledger** is a directory in which bundles accumulate over the years,
-  for example `~/bip322/ledger/`. The PSBTs in it carry the wallet's xpubs,
-  so the ledger stays with the holder; the statement copies out only the
-  `proofs.json` of each bundle it cites. Back the ledger up like the
-  wallet's own records.
+* **A snapshot** is one round of proofs: `bip322 audit snapshot` (every
+  funded address) or `prove` (given addresses) writes `snapshot.json`,
+  `message.txt` and `to_sign/to_sign-NN.psbt`, one per address; the signers
+  fill `signed/`; `finalize` writes the proofs file.
+* **A proofs file**, `<wallet>-<date>-<height>-proofs.json`, is the only
+  thing an auditor needs from a snapshot. It names addresses, proofs and
+  outputs, and the policy (`2 of 3`); it carries no descriptor, xpub,
+  derivation path or node wallet name. It keeps that one name wherever it
+  goes: in the snapshot, beside a statement, on the auditor's disk.
 * **The statement** (`bip322 report`) is the document for the
   auditor: opening and closing balances, the movements, the closing UTXOs
   each backed by a verified proof, one page per UTXO with the two commands
   that check it, a section on how a proof works, and notes.
+
+## Where everything lives
+
+One directory, `~/bip322` (`BIP322_DIR` moves it), with one configuration
+file and one directory per wallet. The tools name everything in it; `-w`
+names the wallet, and the wallet names the rest:
+
+```
+~/bip322/
+  config.toml
+  treasury/
+    snapshots/
+      2026-03-02-880412/                  # a prove during the year
+      2026-10-09-920114/                  # the year-end snapshot
+        snapshot.json  message.txt  to_sign/  signed/
+        treasury-2026-10-09-920114-proofs.json
+    statements/
+      2026/
+        treasury-2026.pdf  treasury-2026.json  treasury-2026.csv
+        treasury-2026-10-09-920114-proofs.json
+```
+
+Directories are named for their place, so the names stay bare; files that
+leave the tree carry wallet, time and kind in their name. A second wallet
+is a second directory, created the first time a command writes into it.
+The snapshots hold the PSBTs, which carry the wallet's xpubs: they stay with
+the holder, and are backed up like the wallet's own records. The statements
+are what leaves.
+
+`config.toml` is optional. Top-level keys are defaults for every wallet, a
+`[wallets.NAME]` table is for one, and the command line beats both:
+
+```toml
+wallet = "treasury"                 # the default -w
+text = "Proof of control {date}"    # the message template
+dust = 1000                         # satoshi; see --dust
+
+[wallets.treasury]
+holder = "Company AB"
+node = "treasury-2of3-main"         # the node wallet, when its name is not the directory's
+```
+
+Other keys: `cli` (how to reach the node), `timeout`, `theme`, `heading`,
+`explorer`. Without the file and without `-w`, the node's one loaded
+wallet is the wallet.
 
 ## Install
 
@@ -58,20 +101,20 @@ python3.12 python3.12-venv`, then `python3.12 -m venv ~/.bip322`.
 `[kernel]` adds Bitcoin Core's consensus library as a second verification
 engine; `[pdf]` adds WeasyPrint for the PDF (it needs Pango on the machine;
 see the README). Upgrading is the same line with `--upgrade`. The commands talk to the node
-through `bitcoin-cli`; `--cli "bitcoin-cli -rpcwallet=…"` or `-w NAME`
-selects the wallet.
+through `bitcoin-cli`; `--cli "bitcoin-cli -signet"` or `cli` in
+`config.toml` says how.
 
 ## The year, for the holder
 
-### At year end: the full bundle
+### At year end: the full snapshot
 
 Some days into January, when the closing block is buried:
 
 ```sh
-bip322 audit -w treasury snapshot --text "Proof of control {date}" -o ledger/2026-year-end
+bip322 audit snapshot                 # -> ~/bip322/treasury/snapshots/2026-01-08-931871/
 ```
 
-The stamp is the block six behind the tip; the bundle lists every funded
+The stamp is the block six behind the tip; the snapshot lists every funded
 address and writes one `to_sign` PSBT per address. This is a **full**
 snapshot, not `--skip-proven`: every closing UTXO must have a proof dated
 after the closing block, including change proven earlier in the year.
@@ -82,33 +125,43 @@ Each PSBT is a BIP-322 `to_sign` transaction: it spends a virtual 0-satoshi
 output, and a device that implements BIP-322's PSBT-signer role shows the
 message and the address it is for. Sign each PSBT on as many devices as
 the threshold asks, each from the unsigned copy, and put the results into
-the bundle's `signed/` directory under any names (`to_sign-01-A.psbt`,
+the snapshot's `signed/` directory under any names (`to_sign-01-A.psbt`,
 `to_sign-01-C.psbt`, …). Some devices refuse a PSBT that already carries
 enough signatures; signing the unsigned copy on each avoids the question.
 `finalize` combines them. The message template is checked against what
-signing devices can display (`bip322 lint-message`).
+signing devices can display (`bip322 lint-message`). Before the first
+finalize of a new device set, `bip322 checksigners signed/*.psbt` verifies
+each cosigner's signature alone and every threshold combination.
 
 ### Finalize, verify, report
 
 ```sh
-bip322 audit finalize ledger/2026-year-end          # combines, finalises, self-verifies, writes proofs.json
-bip322 audit verify ledger/2026-year-end             # what the auditor will run; should end in OK
-bip322 report -w treasury --year 2026 --ledger ledger --dust 1000 --pdf -o treasury-2026
+bip322 audit finalize                 # the newest snapshot: combines, self-verifies, writes the proofs file
+bip322 audit verify                   # what the auditor will run; should end in OK
+bip322 report --year 2026             # -> ~/bip322/treasury/statements/2026/
 ```
 
-`bip322 report` reads the wallet's history from the node, verifies every bundle in
-the ledger against the node, picks for each closing UTXO a proof of its
-script (a verified one first, then one whose bundle lists that very UTXO,
-then the newest), looks each UTXO up on the chain at the block of its proof,
-cross-checks the node's `listunspent` when the period ends at the tip, and
-prints a summary ending in `RESULT: OK` (exit status 0) or
-`RESULT: ATTENTION` (exit status 1); an error exits 2. ATTENTION means the
-reconciliation failed, a closing UTXO has no verified proof, a lookup on the
-chain contradicts the statement, or the node wallet disagrees with the
-closing UTXOs. A proof whose block is before the period's end, or a UTXO
-spent after the period, is shown on the UTXO's page and is not a failed
-check. On a node that has no block after the period's end yet (still
-syncing, or behind), it refuses: the closing block is not settled.
+Each takes the wallet from `-w`, else from `config.toml`, else from the
+node; `finalize` and `verify` take a snapshot's name
+(`finalize 2026-01-08-931871`) or a path when the newest is not the one
+meant.
+
+`bip322 report` reads the wallet's history from the node, verifies every
+proofs file under the wallet's snapshots against the node, picks for each
+closing UTXO a proof of its script (a verified one first, then one whose
+snapshot lists that very UTXO, then the newest), looks each UTXO up on the
+chain at the block of its proof, cross-checks the node's `listunspent` when
+the period ends at the tip, and prints a summary ending in `RESULT: OK`
+(exit status 0) or `RESULT: ATTENTION` (exit status 1); an error exits 2.
+ATTENTION means the reconciliation failed, a closing UTXO has no verified
+proof, a lookup on the chain contradicts the statement, or the node wallet
+disagrees with the closing UTXOs. A proof whose block is before the period's
+end, or a UTXO spent after the period, is shown on the UTXO's page and is
+not a failed check. On a node that has no block after the period's end yet
+(still syncing, or behind), it refuses: the closing block is not settled.
+
+The statement is the PDF when WeasyPrint is installed (`[pdf]`), else one
+HTML file with the fonts inside it; `--html` asks for the HTML regardless.
 
 `--dust N` leaves dust out of every figure: an output of at most N satoshi
 that others paid to the wallet in a transaction spending nothing of the
@@ -117,17 +170,19 @@ own change and consolidations are never dust. Dust the wallet does spend
 is booked in the block that spends it, as a movement of its own, so each
 opening balance is the closing balance before it. The notes state the rule and the count,
 the JSON lists the outputs. A threshold above 10000 satoshi needs
-`--dust-force`.
+`--dust-force`. `dust` in `config.toml` sets it once.
 
-`--ledger` may also name one bundle directory or one `proofs.json`, and may
-repeat; a path that does not exist or holds no bundle is an error.
+`--snapshots DIR` takes the proofs from elsewhere than the wallet's own
+snapshots: a directory of snapshots, one snapshot, or one proofs file, and
+may repeat; a path that does not exist or holds no proofs file is an error.
 
 ### What to hand over
 
-The output directory, `treasury-2026/`: the PDF, the JSON with every figure,
-the CSV of movements, `fonts/`, and `ledger/…/proofs.json` for each bundle
-the statement cites on a UTXO's page, under the name the statement uses.
-No other bundle of the ledger is copied or named. Never the ledger itself.
+The statement directory, `~/bip322/treasury/statements/2026/`: the PDF, the
+JSON with every figure, the CSV of movements, and a copy of each proofs
+file the statement cites on a UTXO's page, under its own name. No other
+proofs file is copied or named. Never the snapshots: their PSBTs carry the
+wallet's xpubs.
 
 ## During the year, for the holder
 
@@ -135,30 +190,30 @@ No other bundle of the ledger is copied or named. Never the ledger itself.
 prove it before broadcasting:
 
 ```sh
-bip322 audit -w treasury prove bc1q…change… --text "Proof of control {date}" --ledger ledger
+bip322 audit prove bc1q…change…       # -> snapshots/<date>-<height>/
 # sign to_sign/*.psbt, put the results in signed/, then
-bip322 audit finalize ledger/snapshot-<date>-<height>     # VALID -> broadcast
+bip322 audit finalize                 # VALID -> broadcast
 ```
 
 A valid proof means the quorum controls where the change goes. In a
-statement produced before the year-end bundle, that UTXO shows AFTER THE
-PROOF (received after the block its proof names); the year-end bundle gives
-it a proof dated after it.
+statement produced before the year-end snapshot, that UTXO shows AFTER THE
+PROOF (received after the block its proof names); the year-end snapshot
+gives it a proof dated after it.
 
 **New deposit addresses.** Prove them the same way, or after the fact:
 
 ```sh
-bip322 audit -w treasury snapshot --text "Proof of control {date}" --skip-proven ledger
+bip322 audit snapshot --skip-proven
 ```
 
-which takes a bundle over the funded addresses the ledger has not proven
-yet, and exits non-zero saying so when there are none (in a script, treat
-that as "nothing to do").
+which takes a snapshot over the funded addresses no earlier snapshot of the
+wallet proves, and exits non-zero saying so when there are none (in a
+script, treat that as "nothing to do").
 
-**A statement at any time.** `bip322 report --from 2026-01-01 --to 2026-07-01 --ledger ledger`,
+**A statement at any time.** `bip322 report --from 2026-01-01 --to 2026-07-01`,
 or `--year`, or block heights. Everything in it is backed by the holder's own
-proofs; the year-end statement is the same document with the auditor's
-bundle.
+proofs; the year-end statement is the same document with the year-end
+snapshot.
 
 ## The auditor's procedure
 
@@ -173,8 +228,8 @@ script interpreter as a second engine; bip322-report is not needed to verify).
    beyond the figures. A movement of kind `mixed` was funded by the wallet
    and by others: its fee is unknown and shown as such, its amount is the
    wallet's net.
-2. **Re-verify the bundles** on your own node:
-   `bip322 audit verify treasury-2026/ledger/2026-year-end/proofs.json`.
+2. **Re-verify the proofs** on your own node:
+   `bip322 audit verify treasury-2026-01-08-931871-proofs.json`.
    This checks every signature with every engine installed, that the
    block named in the message exists at that height with that time, and
    that every output the file lists existed at that block.
@@ -194,13 +249,13 @@ script interpreter as a second engine; bip322-report is not needed to verify).
 The auditor learns the wallet's funded addresses, their UTXOs and the
 movements, which the statement is for. The auditor does not learn the
 descriptor or the xpubs, so cannot derive addresses beyond those shown or
-follow the wallet after the period: `proofs.json` and the statement carry
-none of that, and the ledger's PSBTs, which do, are never handed over.
-Bundles the statement does not cite (another wallet's, or older ones in the
-same ledger) are neither named nor copied. On mainnet the HTML and PDF link
-transactions and scripts to a public block explorer (`--explorer ''` for
-none, `--explorer URL` for another); on other chains there are no links
-unless `--explorer` is given.
+follow the wallet after the period: the proofs file and the statement carry
+none of that, and the snapshots' PSBTs, which do, are never handed over.
+Proofs files the statement does not cite (older ones, or another wallet's
+given with `--snapshots`) are neither named nor copied. On mainnet the
+statement links transactions and scripts to a public block explorer
+(`--explorer ''` for none, `--explorer URL` for another); on other chains
+there are no links unless `--explorer` is given.
 
 ## Known limitations
 
