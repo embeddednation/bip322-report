@@ -1,9 +1,10 @@
 """``bip322-report``: the statement of a period, backed by verified BIP-322 proofs, from the owner's node wallet.
 
-The statement goes to ``~/bip322/<wallet>/statements/<label>/`` (``--dir`` or ``BIP322_DIR`` moves the tree) as
-``<wallet>-<label>.pdf`` (``.html`` where the PDF cannot be made), ``.json``, ``.csv``, and a copy of
-each proofs file it cites; the proofs come from ``~/bip322/<wallet>/snapshots/``.  ``-w`` names the
-wallet, else ``config.toml`` does, else the node's one loaded wallet is it.
+The statement goes to ``<wallet>/statements/<label>/`` in the data directory (the one ``bip322 init``
+made at or above the current directory; ``--dir`` or ``BIP322_DIR`` name another) as ``<wallet>-<label>.pdf``
+(``.html`` where the PDF cannot be made), ``.json``, ``.csv``, and a copy of each proofs file it cites;
+the proofs come from ``<wallet>/snapshots/``.  ``-w`` names the wallet, else the wallet directory the
+command runs in does, else ``bip322.toml``, else the node's one loaded wallet is it.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import sys
 from pathlib import Path
 
 from bip322audit.audit import AuditError
-from bip322audit.datadir import Config, ConfigError, data_dir, snapshots_dir, statements_dir, use_data_dir
+from bip322audit.datadir import Config, ConfigError, snapshots_dir, statements_dir, use_data_dir, wallet_of_cwd
 from bip322audit.proofs import find_proofs
 from bip322audit.rpc import BitcoinCli, RpcError, btc
 from bip322core._version import SPEC
@@ -41,16 +42,19 @@ def _opt(args, name: str):
 
 
 def _wallet_name(args, config: Config) -> str | None:
-    """The wallet as named by the owner: ``-w``, else ``wallet`` in config.toml; None when neither says."""
+    """The wallet as named by the owner: ``-w``, else the wallet directory the command runs in, else ``wallet`` in bip322.toml; None when none says."""
     given = _opt(args, "wallet")
     if given:
         return str(given)
+    here = wallet_of_cwd()
+    if here is not None:
+        return here
     named = config.get("wallet")
     return str(named) if named is not None else None
 
 
 def _cli(args, config: Config, wallet: str | None) -> BitcoinCli:
-    """The node as the options and config.toml describe it, on the wallet's node wallet when one is named."""
+    """The node as the options and bip322.toml describe it, on the wallet's node wallet when one is named."""
     cli = BitcoinCli(_opt(args, "cli") or config.get("cli", wallet) or "bitcoin-cli")
     if wallet is not None:
         cli.argv.append(f"-rpcwallet={config.node_wallet(wallet)}")
@@ -58,7 +62,7 @@ def _cli(args, config: Config, wallet: str | None) -> BitcoinCli:
 
 
 def _setting(args, config: Config, name: str, key: str, wallet: str | None, default=None):
-    """An option's value: the command line, else config.toml (the wallet's table, then the top level), else ``default``."""
+    """An option's value: the command line, else bip322.toml (the wallet's table, then the top level), else ``default``."""
     given = getattr(args, name, None)
     return given if given is not None else config.get(key, wallet, default)
 
@@ -243,7 +247,7 @@ def _report_history(args, cli: BitcoinCli, config: Config, wallet: str | None, p
     if wallet is None and history.wallet is not None:
         wallet = config.wallet_of_node(str(history.wallet))
     if wallet is None:
-        raise CLIError("no wallet name for the statement: -w NAME (or wallet = NAME in config.toml)")
+        raise CLIError("no wallet name for the statement: -w NAME (or wallet = NAME in bip322.toml)")
     directory = Path(args.output) if args.output else statements_dir(wallet) / period_label
     _check_directory(directory, args.force)
     _check_history(cli, history, args.history or "the history")
@@ -343,8 +347,9 @@ def build_parser() -> argparse.ArgumentParser:
             "The statement of a period: holdings and movements in which every coin is backed by a verified BIP-322 proof of "
             f"control, from the owner's node wallet ({SPEC}). With no command the statement is made: "
             "bip322-report [--cli CMD] [-w NAME] (--year Y | --from WHEN --to WHEN | --from-height H --to-height H) [options]. "
-            f"It goes to {data_dir()}/<wallet>/statements/<label>/ and its proofs come from {data_dir()}/<wallet>/snapshots/ "
-            "(--dir or BIP322_DIR moves the tree); config.toml there holds the defaults."
+            "It goes to <wallet>/statements/<label>/ in the data directory and its proofs come from <wallet>/snapshots/ there: "
+            "the directory bip322 init made at or above the current one (--dir or BIP322_DIR name another), whose bip322.toml "
+            "holds the defaults."
         ),
     )
     parser.add_argument("--version", action="version", version=f"{TOOL} ({SPEC})")
@@ -352,21 +357,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--cli",
         default=None,
         metavar="CMD",
-        help='how to reach the node, e.g. "bitcoin-cli -signet" (default: bitcoin-cli, or cli in config.toml)',
+        help='how to reach the node, e.g. "bitcoin-cli -signet" (default: bitcoin-cli, or cli in bip322.toml)',
     )
     parser.add_argument(
         "--wallet",
         "-w",
         default=None,
         metavar="NAME",
-        help=f"the wallet: its directory {data_dir()}/NAME, and the node wallet of that name (or the one its [wallets.NAME] table "
-        "names as node). Default: wallet in config.toml, else the node's one loaded wallet. May also follow the command.",
+        help="the wallet: its directory NAME in the data directory, and the node wallet of that name (or the one its [wallets.NAME] "
+        "table names as node). Default: the wallet directory the command runs in, else wallet in bip322.toml, else the node's one "
+        "loaded wallet. May also follow the command.",
     )
     parser.add_argument(
         "--dir",
         default=None,
         metavar="DIR",
-        help=f"the data directory (default {data_dir()}: BIP322_DIR in the environment, else ~/bip322). May also follow the command.",
+        help="the data directory (default: the nearest directory at or above the current one with a bip322.toml, or BIP322_DIR). "
+        "May also follow the command.",
     )
     sub = parser.add_subparsers(dest="command", metavar="command")
     sub.required = True
@@ -415,7 +422,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Opening and closing balances, every movement between them, a reconciliation, and for each closing output the BIP-322 proof of "
             "control, from the wallet's snapshots, that lists it, re-verified against the node now. The period is a calendar year, two instants, or two "
             "heights; opening figures are as of the start block, closing figures as of the end block. "
-            f"The files go to {data_dir()}/<wallet>/statements/<label>/, named <wallet>-<label>.pdf (.html where WeasyPrint is not "
+            "The files go to <wallet>/statements/<label>/ in the data directory, named <wallet>-<label>.pdf (.html where WeasyPrint is not "
             "installed, or with --html), .json, .csv, and a copy of each proofs file the statement cites, under its own name. "
             "Exit status: 0 when the result is OK, 1 when it is ATTENTION, 2 on an error."
         ),
@@ -433,7 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="take the proofs from here instead of the wallet's snapshots/: a directory of snapshots, one snapshot, or one proofs file; may repeat",
     )
     p.add_argument(
-        "--holder", metavar="NAME", help="the holder of the wallet, as named in the statement's header (default: holder in config.toml)"
+        "--holder", metavar="NAME", help="the holder of the wallet, as named in the statement's header (default: holder in bip322.toml)"
     )
     p.add_argument(
         "--dust",
@@ -444,7 +451,7 @@ def build_parser() -> argparse.ArgumentParser:
             "outputs of at most SATS satoshi received from others, in a transaction that spends nothing of the wallet's, "
             "and not spent by the closing block are dust: "
             "left out of every figure, and listed in the JSON; the wallet's own change and consolidations never are "
-            "(default: dust in config.toml, else none)"
+            "(default: dust in bip322.toml, else none)"
         ),
     )
     p.add_argument("--dust-force", action="store_true", help=f"accept a --dust above {DUST_MAX} satoshi")
@@ -456,14 +463,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--explorer",
         default=None,
         metavar="URL",
-        help=f"block explorer for links in the statement; '' for no links (default: explorer in config.toml, else {EXPLORER} on mainnet, none on other chains)",
+        help=f"block explorer for links in the statement; '' for no links (default: explorer in bip322.toml, else {EXPLORER} on mainnet, none on other chains)",
     )
     p.add_argument("--html", action="store_true", help="write the statement as one HTML file instead of the PDF")
     p.add_argument(
         "--theme",
         choices=tuple(THEMES),
         default=None,
-        help=f"page colours: a warm canvas with serif text (journal), Solarized light, white paper or Solarized dark (default: theme in config.toml, else {DEFAULT_THEME})",
+        help=f"page colours: a warm canvas with serif text (journal), Solarized light, white paper or Solarized dark (default: theme in bip322.toml, else {DEFAULT_THEME})",
     )
     p.add_argument(
         "--heading",

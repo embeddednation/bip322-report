@@ -23,7 +23,7 @@ DATADIR=$(mktemp -d)
 PORT=$(.venv/bin/python -m bip322audit.testing port)
 CLI="$CORE/bin/bitcoin-cli -regtest -datadir=$DATADIR -rpcport=$PORT -rpcuser=demo -rpcpassword=demo"
 DEV=.venv/bin/bip322-dev; AUDIT=.venv/bin/bip322-audit; REPORT=.venv/bin/bip322-report
-export BIP322_DIR="$WORK/bip322"   # the data directory for this run: ~/bip322 in real life, with one directory per wallet
+export BIP322_DIR="$WORK/bip322"   # the data directory for this run (in real life: cd into it and bip322 init)
 SNAPSHOTS="$BIP322_DIR/watch/snapshots"; STATEMENTS="$BIP322_DIR/watch/statements"
 step() { printf '\n\033[1m=== %s ===\033[0m\n' "$*"; }
 run() { printf '$ %s\n' "$*" >&2; "$@"; }

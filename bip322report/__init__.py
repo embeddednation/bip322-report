@@ -10,7 +10,7 @@ coin the proof of control that covers it, re-verified at report time.
 * ``history``  the wallet's transactions from the node, cached as JSON
 * ``block``    the last block before a UTC date or time
 * ``balance``  the coins and balance at a height or date
-* ``report``   the statement for a period: PDF (or HTML), JSON, CSV, into ``~/bip322/<wallet>/statements/``; the default command
+* ``report``   the statement for a period: PDF (or HTML), JSON, CSV, into ``<wallet>/statements/`` in the data directory; the default command
 """
 
 from ._version import __version__

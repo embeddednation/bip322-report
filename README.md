@@ -63,9 +63,9 @@ to PDF from a browser), and `report` says so; `--html` asks for that.
 ## The flow
 
 ```sh
-# everything under ~/bip322/treasury/: the snapshots bip322-audit writes, the statements this writes.
+# everything under treasury/ in the directory bip322 init made: the snapshots bip322-audit writes, the statements this writes.
 # before broadcasting a spend: prove its change address
-bip322 audit prove bc1q...change...   # -> ~/bip322/treasury/snapshots/<date>-<height>/
+bip322 audit prove bc1q...change...   # -> treasury/snapshots/<date>-<height>/
 #   sign to_sign/*.psbt on the cosigners' devices, put the results in signed/, then
 bip322 audit finalize                 # the newest snapshot; valid -> broadcast
 # anything that arrived on addresses not yet proven (deposits):
@@ -73,12 +73,12 @@ bip322 audit snapshot --skip-proven
 
 # the year's statement
 bip322 report --year 2026
-#   -> ~/bip322/treasury/statements/2026/: treasury-2026.pdf (or .html), .json, .csv, and the proofs files it cites
+#   -> treasury/statements/2026/: treasury-2026.pdf (or .html), .json, .csv, and the proofs files it cites
 ```
 
-The wallet is `-w NAME`, else `wallet` in `~/bip322/config.toml`, else the
-node's one loaded wallet; `-o DIR` writes the statement elsewhere, `--dir DIR`
-moves the whole tree. The tree and the configuration file are described in bip322-audit's README and the
+The wallet is `-w NAME`, else the wallet directory the command runs in, else
+`wallet` in `bip322.toml`, else the node's one loaded wallet; `-o DIR` writes the
+statement elsewhere, `--dir DIR` names the data directory from elsewhere. The tree and the configuration file are described in bip322-audit's README and the
 handbook; the keys this package reads are `wallet`, `cli`, `holder`,
 `dust`, `theme`, `heading`, `explorer`, and `node` per wallet.
 
@@ -257,7 +257,7 @@ hold (older ones, another wallet's given with `--snapshots`) appears as a
 bare count.
 
 **What to hand over:** the statement directory,
-`~/bip322/<wallet>/statements/<label>/`. Four kinds of file and nothing
+`<wallet>/statements/<label>/` in the data directory. Four kinds of file and nothing
 else: `<wallet>-<label>.pdf` (or `.html`), `.json`, `.csv`, and a copy of
 each proofs file the statement cites, and no other, under its own name, so
 a reader can run `bip322 audit verify` on each. Never hand over the

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.0 (2026-10-13)
+
+Needs bip322-audit 0.15: the data directory is the one `bip322 init` made at
+or above the current directory, marked by its `bip322.toml` (was `config.toml`
+in `~/bip322`); inside a wallet's directory that wallet is the one meant.
+
 ## 0.10.2 (2026-10-13)
 
 - Needs bip322-audit 0.14, whose `init` writes `config.toml` with every key

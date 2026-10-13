@@ -39,13 +39,17 @@ given as its argument.
 
 ## Where everything lives
 
-One directory, `~/bip322` (`--dir DIR` or `BIP322_DIR` moves it), with one
-configuration file and one directory per wallet. The tools name everything in it; `-w`
-names the wallet, and the wallet names the rest:
+A directory the holder chooses, made once with `bip322 init`: it writes
+`bip322.toml`, which marks the directory and holds the defaults, and from
+then on every command run in it or below finds it, as git finds its
+repository (`--dir DIR` or `BIP322_DIR` name it from elsewhere). Inside, one
+directory per wallet; the tools name everything else. `-w` names the wallet,
+or the wallet directory the command runs in does, and the wallet names the
+rest:
 
 ```
-~/bip322/
-  config.toml
+~/bip322/                                 # wherever bip322 init was run
+  bip322.toml
   treasury/
     snapshots/
       2026-03-02-880412/                  # a prove during the year
@@ -65,7 +69,7 @@ The snapshots hold the PSBTs, which carry the wallet's xpubs: they stay with
 the holder, and are backed up like the wallet's own records. The statements
 are what leaves.
 
-`config.toml` is optional. Top-level keys are defaults for every wallet, a
+In `bip322.toml`, top-level keys are defaults for every wallet, a
 `[wallets.NAME]` table is for one, and the command line beats both:
 
 ```toml
@@ -78,12 +82,12 @@ holder = "Company AB"
 node = "treasury-2of3-main"         # the node wallet, when its name is not the directory's
 ```
 
-`bip322 init treasury` writes the file with every key shown, the ones not
-given as comments to switch on.
+`bip322 init -w treasury` writes the file with every key shown, all but
+`wallet` and its table as comments to switch on.
 
 Other keys: `cli` (how to reach the node), `timeout`, `theme`, `heading`,
-`explorer`. Without the file and without `-w`, the node's one loaded
-wallet is the wallet.
+`explorer`. Without `-w` and outside a wallet's directory, `wallet` in the
+file names the wallet, else the node's one loaded wallet is it.
 
 ## Install
 
@@ -105,7 +109,7 @@ python3.12 python3.12-venv`, then `python3.12 -m venv ~/.bip322`.
 engine; `[pdf]` adds WeasyPrint for the PDF (it needs Pango on the machine;
 see the README). Upgrading is the same line with `--upgrade`. The commands talk to the node
 through `bitcoin-cli`; `--cli "bitcoin-cli -signet"` or `cli` in
-`config.toml` says how.
+`bip322.toml` says how.
 
 ## The year, for the holder
 
@@ -114,7 +118,7 @@ through `bitcoin-cli`; `--cli "bitcoin-cli -signet"` or `cli` in
 Some days into January, when the closing block is buried:
 
 ```sh
-bip322 audit snapshot                 # -> ~/bip322/treasury/snapshots/2026-01-08-931871/
+bip322 audit snapshot                 # -> treasury/snapshots/2026-01-08-931871/
 ```
 
 The stamp is the block six behind the tip; the snapshot lists every funded
@@ -141,10 +145,11 @@ each cosigner's signature alone and every threshold combination.
 ```sh
 bip322 audit finalize                 # the newest snapshot: combines, self-verifies, writes the proofs file
 bip322 audit verify                   # what the auditor will run; should end in OK
-bip322 report --year 2026             # -> ~/bip322/treasury/statements/2026/
+bip322 report --year 2026             # -> treasury/statements/2026/
 ```
 
-Each takes the wallet from `-w`, else from `config.toml`, else from the
+Each takes the wallet from `-w`, else from the wallet directory it runs in,
+else from `bip322.toml`, else from the
 node; `finalize` and `verify` take a snapshot's name
 (`finalize 2026-01-08-931871`) or a path when the newest is not the one
 meant.
@@ -173,7 +178,7 @@ own change and consolidations are never dust. Dust the wallet does spend
 is booked in the block that spends it, as a movement of its own, so each
 opening balance is the closing balance before it. The notes state the rule and the count,
 the JSON lists the outputs. A threshold above 10000 satoshi needs
-`--dust-force`. `dust` in `config.toml` sets it once.
+`--dust-force`. `dust` in `bip322.toml` sets it once.
 
 `--snapshots DIR` takes the proofs from elsewhere than the wallet's own
 snapshots: a directory of snapshots, one snapshot, or one proofs file, and
@@ -181,7 +186,7 @@ may repeat; a path that does not exist or holds no proofs file is an error.
 
 ### What to hand over
 
-The statement directory, `~/bip322/treasury/statements/2026/`: the PDF, the
+The statement directory, `treasury/statements/2026/`: the PDF, the
 JSON with every figure, the CSV of movements, and a copy of each proofs
 file the statement cites on a UTXO's page, under its own name. No other
 proofs file is copied or named. Never the snapshots: their PSBTs carry the

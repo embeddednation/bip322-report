@@ -101,7 +101,7 @@ of proofs is the wallet's snapshots: bip322-audit's directories on disk, each
 with its proofs file, self-contained and independently verifiable. There is
 nothing else to keep in sync.
 
-The tree is `~/bip322/<wallet>/`, shared with bip322-audit: `snapshots/`
+The tree is `<wallet>/` under the directory `bip322 init` made, shared with bip322-audit: `snapshots/`
 is read, `statements/<label>/` is written. A directory is named for its
 place and stays bare; a file that leaves the tree is named for its life,
 `<wallet>-<label>.pdf` and `<wallet>-<date>-<height>-proofs.json`, so the

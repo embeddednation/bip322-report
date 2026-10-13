@@ -428,3 +428,13 @@ def test_the_sample_config_names_a_theme_and_a_heading_style_that_exist():
     data = tomllib.loads(re.sub(r"^# (?=[a-z]+ = |\[)", "", sample_config(), flags=re.M))
     assert data["theme"] == cli_module.DEFAULT_THEME in cli_module.THEMES and data["heading"] in cli_module.HEADINGS
     assert set(data["wallets"]) == {"treasury", "personal"} and tomllib.loads(sample_config()) == {}
+
+
+def test_inside_a_wallets_directory_that_wallet_is_meant(bundles, wallet, run, tmp_path, monkeypatch):
+    """Run in books/ (not the node wallet's name), the statement is books'; no -w, no asking the node which wallet."""
+    node = _node(wallet, tip=1000)
+    _place(bundles, tmp_path / "bip322" / "books" / "snapshots" / "full", "full")
+    monkeypatch.chdir(tmp_path / "bip322" / "books")
+    code, out, err = run(node, "report", *HEIGHTS)
+    assert code == 0 and out.strip() == str(tmp_path / "bip322" / "books" / "statements" / "979..1000")
+    assert _written(out.strip(), ".json").name == "books-979..1000.json"
