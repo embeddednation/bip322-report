@@ -78,6 +78,9 @@ holder = "Company AB"
 node = "treasury-2of3-main"         # the node wallet, when its name is not the directory's
 ```
 
+`bip322 init treasury` writes the file with every key shown, the ones not
+given as comments to switch on.
+
 Other keys: `cli` (how to reach the node), `timeout`, `theme`, `heading`,
 `explorer`. Without the file and without `-w`, the node's one loaded
 wallet is the wallet.

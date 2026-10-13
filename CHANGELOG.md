@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.2 (2026-10-13)
+
+- Needs bip322-audit 0.14, whose `init` writes `config.toml` with every key
+  shown; the handbook says so.
+
 ## 0.10.1 (2026-10-12)
 
 - `--dir DIR` puts the tree elsewhere than `~/bip322` (as `BIP322_DIR` does).

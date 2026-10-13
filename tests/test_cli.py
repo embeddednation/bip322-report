@@ -1,7 +1,9 @@
 """The command line: what it refuses before any work, how it names and copies proofs files, and what it exits with."""
 
 import json
+import re
 import shutil
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -417,3 +419,12 @@ def test_wallet_and_dir_go_before_or_after_any_command(bundles, wallet, run, tmp
     assert code == 2 and "exists and is not empty" in err  # the same place, found again
     for argv in (["block", "-w", "x", "2026-01-01"], ["history", "--dir", "d", "-w", "x"], ["report", "-y", "2026", "--dir", "d"]):
         cli_module.build_parser().parse_args(argv)  # accepted after the command
+
+
+def test_the_sample_config_names_a_theme_and_a_heading_style_that_exist():
+    """bip322 init writes bip322-audit's sample; the theme and heading it suggests must be ones this package renders."""
+    from bip322audit.datadir import sample_config
+
+    data = tomllib.loads(re.sub(r"^# (?=[a-z]+ = |\[)", "", sample_config(), flags=re.M))
+    assert data["theme"] == cli_module.DEFAULT_THEME in cli_module.THEMES and data["heading"] in cli_module.HEADINGS
+    assert set(data["wallets"]) == {"treasury", "personal"} and tomllib.loads(sample_config()) == {}
