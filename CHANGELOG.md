@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.1 (2026-10-15)
+
+Needs bip322-core 0.12 and bip322-audit 0.15.1: `bip322 checksigners
+signed/*.psbt` checks every address of a snapshot at once, as the handbook
+says.
+
 ## 0.11.0 (2026-10-13)
 
 Needs bip322-audit 0.15: the data directory is the one `bip322 init` made at
