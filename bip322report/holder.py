@@ -1,30 +1,19 @@
 """The holder's ledger: several wallets' histories as one.
 
-A holder's wallets are the wallet directories whose ``holder`` in bip322.toml
-(their own table, else the top level) is the holder's name; a wallet that
-names no holder belongs to whichever holder a command is run for.  Their
-histories merge by txid: a transaction that is a send in one wallet and a
+A holder is a ``[holders.KEY]`` table in bip322.toml: ``name`` and the
+``wallets`` that are its.  Their histories merge by txid: a transaction that is a send in one wallet and a
 receive in another is one movement between them (kind ``transfer``), its fee
 exact, and every coin knows its wallet.  The ledger goes to
-``holders/<slug>/<label>/`` in the data directory, named for the holder.
+``holders/KEY/<label>/`` in the data directory, named for the holder.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import replace
 
 from .history import Coin, History, Outpoint, WalletTx, chain_order
 
-__all__ = ["holder_slug", "merge_histories"]
-
-
-def holder_slug(name: str) -> str:
-    """The holder's name as a directory and file name: lower case, anything but letters and digits as one dash."""
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    if not slug:
-        raise ValueError(f"{name!r} gives no usable directory name")
-    return slug
+__all__ = ["merge_histories"]
 
 
 def merge_histories(histories: dict[str, History]) -> History:

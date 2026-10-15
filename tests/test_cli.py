@@ -465,3 +465,17 @@ def test_the_addresses_table_names_the_other_side_in_the_csv(wallet, run, tmp_pa
     (data_dir / "bip322.toml").write_text('[addresses]\n"bc1q" = 3\n')
     code, out, err = run(node, "-w", "watch", "report", "--from-height", "980", "--to-height", "1000", "-o", "bad")
     assert code == 2 and "[addresses] must map each address to the name of the wallet" in err and not Path("bad").exists()
+
+
+def test_the_statement_header_names_the_holder_whose_table_lists_the_wallet(wallet, run, tmp_path):
+    node = _node(wallet, tip=1000)
+    data_dir = Path(os.environ["BIP322_DIR"])
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "bip322.toml").write_text('holder = "Fallback"\n\n[holders.company]\nname = "Company AB"\nwallets = ["watch"]\n')
+    code, out, err = run(node, "-w", "watch", "report", *HEIGHTS, "-o", "h")
+    assert json.loads(_written("h", ".json").read_text())["holder"] == "Company AB"
+    (data_dir / "bip322.toml").write_text('holder = "Fallback"\n\n[holders.company]\nname = "Company AB"\nwallets = ["cold"]\n')
+    run(node, "-w", "watch", "report", *HEIGHTS, "-o", "f")
+    assert json.loads(_written("f", ".json").read_text())["holder"] == "Fallback"
+    run(node, "-w", "watch", "report", *HEIGHTS, "-o", "g", "--holder", "Given")
+    assert json.loads(_written("g", ".json").read_text())["holder"] == "Given"

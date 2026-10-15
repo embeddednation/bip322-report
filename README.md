@@ -75,9 +75,9 @@ bip322 audit snapshot --skip-proven
 bip322 report --year 2026
 #   -> treasury/statements/2026/: treasury-2026.pdf (or .html), .json, .csv, and the proofs files it cites
 
-# the holder's ledger over every wallet, from the first reception to now
-bip322 report holder
-#   -> holders/company-ab/2026-10-15/: company-ab-2026-10-15.pdf (or .html), .json, .csv, and the proofs files it cites
+# the holder's ledger over its wallets ([holders.company] in bip322.toml), from the first reception to now
+bip322 report holder company
+#   -> holders/company/2026-10-15/: company-2026-10-15.pdf (or .html), .json, .csv, and the proofs files it cites
 ```
 
 The wallet is `-w NAME`, else the wallet directory the command runs in, else
@@ -87,10 +87,11 @@ handbook; the keys this package reads are `wallet`, `cli`, `holder`,
 `dust`, `theme`, `heading`, `explorer`, `node` per wallet, and the
 `[addresses]` table: the wallet each address of someone else belongs to
 (`"bc1q..." = "Exchange"`), which names the other side of a movement.
-`holder` also groups the wallets: `bip322 report holder` merges the
-histories of every wallet whose holder it is into one ledger, a transfer
-between two of them one movement of kind `transfer`, the balance the
-holder's total, under `holders/<holder>/<label>/`; nothing is listed twice.
+A `[holders.KEY]` table groups wallets: `name` (the statements' header)
+and `wallets`, the wallet directories that are the holder's. `bip322 report
+holder KEY` merges their histories into one ledger, a transfer between two
+of them one movement of kind `transfer`, the balance the holder's total,
+under `holders/KEY/<label>/`.
 
 `bip322 report` prints a summary on stderr and the directory on stdout. For the
 year, made in January from the year-end snapshot:
@@ -128,7 +129,7 @@ bip322 report [--cli CMD] [-w NAME] balance [--at WHEN | --height H] [--history 
 bip322 report [--cli CMD] [-w NAME] (--year Y | --from WHEN --to WHEN | --from-height H --to-height H)
                                      [--snapshots DIR]... [--holder NAME] [--history FILE]
                                      [--rates CSV | --rate N] [--currency CODE] [--dust SATS [--dust-force]] [--explorer URL] [--html] [--theme journal|light|paper|dark] [--heading STYLE] [-o DIR]
-bip322 report [--cli CMD]           holder [--holder NAME] [period as above] [statement options as above]
+bip322 report [--cli CMD]           holder [KEY] [period as above] [statement options as above]
 bip322 report help [COMMAND]
 ```
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.0 (2026-10-15)
+
+Needs bip322-audit 0.18: a holder is a `[holders.KEY]` table in
+`bip322.toml`, `name` and `wallets`, the one place the grouping is written.
+`bip322 report holder [KEY]` (KEY may be left off when there is one holder)
+replaces `--holder NAME`, and the ledger goes to `holders/KEY/<label>/` as
+`KEY-<label>`. A wallet's own statement takes the holder's name from the
+table that lists it, else from the `holder` key as before.
+
 ## 0.13.0 (2026-10-15)
 
 Needs bip322-audit 0.17.

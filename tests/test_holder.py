@@ -12,7 +12,7 @@ from fake_node import FakeNode, block_time
 
 import bip322report.cli as cli_module
 from bip322report.history import History, fetch_history
-from bip322report.holder import holder_slug, merge_histories
+from bip322report.holder import merge_histories
 from bip322report.period import period_for_heights
 from bip322report.render import render_html, write_csv
 from bip322report.report import build_report, format_summary
@@ -89,12 +89,6 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
         merge_histories({"a": histories["treasury"], "b": History("test", None, 1, "00", "", [], [])})
 
 
-def test_the_holder_slug():
-    assert holder_slug("Company AB") == "company-ab" and holder_slug("  Jonas  ") == "jonas" and holder_slug("Été 2026!") == "t-2026"
-    with pytest.raises(ValueError, match="no usable directory name"):
-        holder_slug("***")
-
-
 class _Switch(BitcoinCli):
     """The node the CLI builds: -rpcwallet=NAME in its argv picks the fake node wallet to answer."""
 
@@ -115,18 +109,21 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
     root = Path(os.environ["BIP322_DIR"])
     for name in ("treasury", "cold"):
         (root / name / "snapshots").mkdir(parents=True)
-    (root / "bip322.toml").write_text(f'holder = "Company AB"\n\n[addresses]\n"{EXCHANGE}" = "Exchange"\n"{OTHER}" = "Exchange"\n')
+    (root / "bip322.toml").write_text(
+        '[holders.company]\nname = "Company AB"\nwallets = ["cold", "treasury"]\n\n'
+        f'[addresses]\n"{EXCHANGE}" = "Exchange"\n"{OTHER}" = "Exchange"\n'
+    )
     monkeypatch.chdir(root)
-    assert cli_module.main(["holder"]) == 1  # no proofs: ATTENTION, and the ledger is written all the same
+    assert cli_module.main(["holder"]) == 1  # the one holder needs no naming; no proofs: ATTENTION, the ledger is written all the same
     out, err = capsys.readouterr()
     date = datetime.fromtimestamp(block_time(1010), UTC).strftime("%Y-%m-%d")
-    assert out.strip() == str(root / "holders" / "company-ab" / date) and "wallets: cold 0.00000000 BTC, treasury 0.00078000 BTC" in err
+    assert out.strip() == str(root / "holders" / "company" / date) and "wallets: cold 0.00000000 BTC, treasury 0.00078000 BTC" in err
     directory = Path(out.strip())
-    assert sorted(p.name for p in directory.iterdir()) == [f"company-ab-{date}.csv", f"company-ab-{date}.html", f"company-ab-{date}.json"]
-    written = json.loads((directory / f"company-ab-{date}.json").read_text())
+    assert sorted(p.name for p in directory.iterdir()) == [f"company-{date}.csv", f"company-{date}.html", f"company-{date}.json"]
+    written = json.loads((directory / f"company-{date}.json").read_text())
     assert written["label"] == "Company AB" and [w["name"] for w in written["wallets"]] == ["cold", "treasury"]
     assert written["period"]["start"]["height"] == 1000 and written["period"]["end"]["height"] == 1010 and written["period"]["to_tip"]
-    rows = list(csv.DictReader((directory / f"company-ab-{date}.csv").open()))
+    rows = list(csv.DictReader((directory / f"company-{date}.csv").open()))
     assert [(r["category"], r["wallet"]) for r in rows] == [
         ("receive", "Exchange -> treasury"),
         ("transfer", "treasury -> cold"),
@@ -134,16 +131,20 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
         ("transfer", "cold -> treasury"),
     ]
     assert rows[-1]["balance"] == "0.00078000"
-    # a period, as for a wallet's statement; and --holder picks the wallets whose holder it is
-    assert cli_module.main(["holder", "--from-height", "1004", "--to-height", "1010"]) == 1
+    # a period, as for a wallet's statement; the holder named by its key
+    assert cli_module.main(["holder", "company", "--from-height", "1004", "--to-height", "1010"]) == 1
     out, _ = capsys.readouterr()
-    assert out.strip() == str(root / "holders" / "company-ab" / "1004..1010")
-    (root / "bip322.toml").write_text('holder = "Company AB"\n\n[wallets.cold]\nholder = "Jonas"\n')
-    assert cli_module.main(["holder", "--holder", "Jonas", "-o", str(tmp_path / "jonas")]) == 0  # cold holds nothing at the end: nothing to cover
-    assert [w["name"] for w in json.loads((tmp_path / "jonas" / f"jonas-{date}.json").read_text())["wallets"]] == ["cold"]
-    assert cli_module.main(["holder", "--holder", "Nobody", "-o", str(tmp_path / "nobody")]) == 2
-    assert "belongs to 'Nobody'" in capsys.readouterr().err
+    assert out.strip() == str(root / "holders" / "company" / "1004..1010")
+    (root / "bip322.toml").write_text(
+        '[holders.company]\nname = "Company AB"\nwallets = ["treasury"]\n\n[holders.jonas]\nwallets = ["cold"]\n'
+    )
+    assert cli_module.main(["holder"]) == 2 and "which holder? one of: company, jonas" in capsys.readouterr().err
+    assert cli_module.main(["holder", "jonas", "-o", str(tmp_path / "jonas")]) == 0  # cold holds nothing at the end: nothing to cover
+    written = json.loads((tmp_path / "jonas" / f"jonas-{date}.json").read_text())
+    assert written["label"] == "jonas" and [w["name"] for w in written["wallets"]] == ["cold"]
+    assert cli_module.main(["holder", "nobody", "-o", str(tmp_path / "nobody")]) == 2
+    assert "no [holders.nobody] in bip322.toml (holders: company, jonas)" in capsys.readouterr().err
     (root / "bip322.toml").write_text("")
-    assert cli_module.main(["holder"]) == 2 and "name the holder" in capsys.readouterr().err
-    assert cli_module.main(["holder", "--holder", "Anyone", "-o", str(tmp_path / "anyone")]) == 1  # wallets naming no holder are the holder's
-    assert [w["name"] for w in json.loads((tmp_path / "anyone" / f"anyone-{date}.json").read_text())["wallets"]] == ["cold", "treasury"]
+    assert cli_module.main(["holder"]) == 2 and "no holder in bip322.toml" in capsys.readouterr().err
+    (root / "bip322.toml").write_text('[holders.a]\nwallets = ["x"]\n[holders.b]\nwallets = ["x"]\n')
+    assert cli_module.main(["holder", "a"]) == 2 and "listed under two holders" in capsys.readouterr().err

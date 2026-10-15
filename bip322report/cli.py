@@ -19,13 +19,11 @@ from bip322audit.audit import AuditError
 from bip322audit.datadir import (
     Config,
     ConfigError,
-    data_dir,
     holder_dir,
     snapshots_dir,
     statements_dir,
     use_data_dir,
     wallet_of_cwd,
-    wallets,
 )
 from bip322audit.proofs import find_proofs
 from bip322audit.rpc import BitcoinCli, RpcError, btc
@@ -37,7 +35,7 @@ from . import TOOL
 from .coverage import pending_snapshots, proofs_names
 from .fiat import Rates
 from .history import History, fetch_history
-from .holder import holder_slug, merge_histories
+from .holder import merge_histories
 from .period import Period, block, last_block_before, parse_when, period_between, period_for_heights, period_for_year
 from .render import HEADINGS, PACKAGE_FONTS, THEMES, render_html, write_csv, write_pdf
 from .report import build_report, format_summary
@@ -336,7 +334,7 @@ def cmd_report(args) -> int:
         history,
         period,
         label=wallet,
-        holder=_setting(args, config, "holder", "holder", wallet),
+        holder=args.holder if args.holder is not None else config.holder_name(wallet),
         proofs_roots=roots,
         cli=cli,
         rates=rates,
@@ -376,14 +374,20 @@ def _write_statement(
 def cmd_holder(args) -> int:
     """The holder's ledger: every wallet of the holder, merged, from the first reception to the tip unless a period is given."""
     config = Config.load()
-    name = args.holder or config.get("holder")
-    if name is None:
-        raise CLIError("name the holder: holder = NAME in bip322.toml, or --holder NAME")
-    name = str(name)
-    members = [w for w in wallets() if config.get("holder", w) in (None, name)]
-    if not members:
-        raise CLIError(f"no wallet directory in {data_dir()} belongs to {name!r} (holder in bip322.toml, per wallet or at the top)")
-    slug = holder_slug(name)
+    holders = config.holders
+    if not holders:
+        raise CLIError(
+            'no holder in bip322.toml: a [holders.KEY] table with name = "..." and wallets = ["NAME", ...] (bip322 init shows one)'
+        )
+    key = args.key
+    if key is None:
+        if len(holders) != 1:
+            raise CLIError(f"which holder? one of: {', '.join(holders)}")
+        key = next(iter(holders))
+    elif key not in holders:
+        raise CLIError(f"no [holders.{key}] in bip322.toml (holders: {', '.join(holders)})")
+    name, members = holders[key]["name"], holders[key]["wallets"]
+    slug = key
     period_label = _period_label(args) if _period_given(args) else None
     dust = _dust(args, config, None)
     rates = _rates(args)
@@ -593,20 +597,22 @@ def build_parser() -> argparse.ArgumentParser:
         "<holder>-<label>.pdf (or .html), .json, .csv and the proofs files it cites, under holders/<holder>/<label>/",
         description=(
             "One statement for a holder with several wallets: their histories merged, a transfer between two of them one movement "
-            "(kind transfer, its fee the only cost), every coin with its wallet, the balance the holder's total. The holder is --holder NAME, "
-            "else holder in bip322.toml; its wallets are the wallet directories whose holder (their [wallets.NAME] table, else the top "
-            "level) it is. Without a period the ledger runs from the block before the first transaction to the tip, labelled by the tip's "
-            "date. The files go to holders/<holder>/<label>/ in the data directory, the holder's name as a slug (company-ab); the CSV's "
-            "wallet column shows both sides (Exchange -> treasury, treasury -> cold). Exit status as for report."
+            "(kind transfer, its fee the only cost), every coin with its wallet, the balance the holder's total. A holder is a "
+            "[holders.KEY] table in bip322.toml: name (the statements' header) and wallets (the wallet directories that are the holder's); "
+            "KEY names it here, and may be left out when there is one. Without a period the ledger runs from the block before the first "
+            "transaction to the tip, labelled by the tip's date. The files go to holders/KEY/<label>/ in the data directory, named "
+            "KEY-<label>; the CSV's wallet column shows both sides (Exchange -> treasury, treasury -> cold). Exit status as for report."
         ),
     )
+    p.add_argument(
+        "key", metavar="HOLDER", nargs="?", help="the holder's KEY, [holders.KEY] in bip322.toml (default: the one holder there)"
+    )
     _add_node_args(p)
-    p.add_argument("--holder", metavar="NAME", help="the holder (default: holder in bip322.toml)")
     _add_period_args(p)
-    _add_statement_args(p, "under holders/<holder>/")
+    _add_statement_args(p, "under holders/HOLDER/")
     p.set_defaults(
         func=cmd_holder,
-        examples=["holder", "holder --year 2026", "holder --holder 'Company AB' --rates sek.csv --currency SEK -o source-of-funds"],
+        examples=["holder", "holder company --year 2026", "holder company --rates sek.csv --currency SEK -o source-of-funds"],
     )
 
     p = sub.add_parser("handbook", help="print the handbook: the yearly flow end to end, for the holder and for the auditor")

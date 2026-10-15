@@ -103,9 +103,9 @@ nothing else to keep in sync.
 
 The tree is `<wallet>/` under the directory `bip322 init` made, shared with bip322-audit: `snapshots/`
 is read, `statements/<label>/` is written; a holder's ledger over several
-wallets goes to `holders/<holder>/<label>/` beside the wallets, the holder's
-name as a slug, the wallets grouped by `holder` in `bip322.toml` so that
-nothing is listed twice. A directory is named for its
+wallets goes to `holders/KEY/<label>/` beside the wallets, the holder being
+a `[holders.KEY]` table in `bip322.toml` with its name and its wallets, the
+one place the grouping is written. A directory is named for its
 place and stays bare; a file that leaves the tree is named for its life,
 `<wallet>-<label>.pdf` and `<wallet>-<date>-<height>-proofs.json`, so the
 statement's files and the proofs files it copies beside itself say what they

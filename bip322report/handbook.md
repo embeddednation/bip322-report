@@ -61,9 +61,9 @@ rest:
         treasury-2026.pdf  treasury-2026.json  treasury-2026.csv
         treasury-2026-10-09-920114-proofs.json
   holders/
-    company-ab/
-      2026-10-15/                         # the holder's ledger to date: every wallet, as one
-        company-ab-2026-10-15.pdf  .json  .csv  + the proofs files it cites
+    company/                              # [holders.company] in bip322.toml
+      2026-10-15/                         # the holder's ledger to date: its wallets, as one
+        company-2026-10-15.pdf  .json  .csv  + the proofs files it cites
 ```
 
 Directories are named for their place, so the names stay bare; files that
@@ -82,8 +82,11 @@ text = "Proof of control {date}"    # the message template
 dust = 1000                         # satoshi; see --dust
 
 [wallets.treasury]
-holder = "Company AB"
 node = "treasury-2of3-main"         # the node wallet, when its name is not the directory's
+
+[holders.company]                   # bip322 report holder company: one ledger over its wallets
+name = "Company AB"                 # the statements' header
+wallets = ["treasury", "cold"]
 
 [addresses]
 "bc1q…" = "Exchange"                # an address of theirs: the wallet it belongs to
@@ -106,14 +109,15 @@ empty, to fill in by hand.
 A holder with several wallets gets one ledger over all of them:
 
 ```sh
-bip322 report holder                  # -> holders/company-ab/2026-10-15/: company-ab-2026-10-15.pdf (or .html), .json, .csv
+bip322 report holder company          # -> holders/company/2026-10-15/: company-2026-10-15.pdf (or .html), .json, .csv
 ```
 
-The holder is `holder` in `bip322.toml` (or `--holder NAME`), and its
-wallets are the wallet directories whose `holder` that is: the top-level key
-makes every wallet the holder's, and a `[wallets.NAME]` table's own `holder`
-gives one wallet to another holder. Nothing is listed twice. The wallets'
-histories merge: a transaction that moves coins from one of the holder's
+A holder is a `[holders.KEY]` table in `bip322.toml`: `name`, as the
+statements put it, and `wallets`, the wallet directories that are the
+holder's. The key is the holder's directory name under `holders/`, and may
+be left off the command when there is one holder. A wallet is listed under
+one holder only; a wallet's own statement takes the holder's name from the
+table that lists it. The wallets' histories merge: a transaction that moves coins from one of the holder's
 wallets to another is one movement of kind `transfer`, its fee the only
 cost, and the balance is the holder's total, each wallet's beside it in the
 JSON and the statement. Without a period the ledger runs from the block
