@@ -312,6 +312,7 @@ def cmd_report(args) -> int:
         engines=args.engines.split(",") if args.engines else None,
         progress=_progress,
         dust_sat=dust,
+        addresses=config.addresses,
     )
     stem = _file_stem(wallet, period_label)
     report["name"] = stem

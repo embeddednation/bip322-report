@@ -186,11 +186,8 @@ def test_report_backs_every_closing_coin_with_a_verified_proof(tmp_path, wallet,
     csv_path = tmp_path / "t.csv"
     write_csv(report, csv_path)
     lines = csv_path.read_text().splitlines()
-    assert (
-        lines[0] == "time_utc,height,txid,kind,amount_btc,fee_btc,net_btc,rate,amount_fiat,fee_fiat,net_fiat,ours_in,ours_out,others_out"
-        and len(lines) == 3
-    )
-    assert "send,-0.20000000,0.01000000,-0.21000000,1000000,-200000.00,10000.00,-210000.00" in lines[1]
+    assert lines[0] == "time,txid,category,amount,balance,wallet,rate,amount_fiat" and len(lines) == 3
+    assert lines[1].endswith(",send,-0.21000000,0.64000000,,1000000,-210000.00")
 
     # coverage prefers a verified proof with the latest stamp; the proofs files can be given as their snapshots too
     files = load_proofs_files(node, [ledger / "snapshot-1", ledger / "snapshot-2"])

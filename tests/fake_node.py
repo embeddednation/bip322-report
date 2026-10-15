@@ -32,6 +32,7 @@ class FakeNode(BitcoinCli):
         self.order: list[str] = []
         self.calls: list[tuple] = []
         self.hide_mempool_spent = False  # like a real node wallet: listunspent leaves out what an unconfirmed transaction spends
+        self.others: dict[tuple[str, int], str] = {}  # outputs of transactions that are not the wallet's: outpoint -> address
 
     # ---- test-side setup --------------------------------------------------- #
 
@@ -197,7 +198,18 @@ class FakeNode(BitcoinCli):
             tx = self.txs.get(txid)
             if not tx or tx["height"] is None or fake_hash(tx["height"]) != blockhash:
                 raise RpcError("No such transaction found in the provided block")
-            return {**self._decoded(txid), "blockhash": blockhash}
+            decoded = {**self._decoded(txid), "blockhash": blockhash}
+            if params[1] in (2, "2"):  # verbosity 2: each input's prevout, from the block's undo data
+                outputs = self._outputs()
+                for v in decoded["vin"]:
+                    if "coinbase" in v:
+                        continue
+                    address = (
+                        outputs[(v["txid"], v["vout"])][0] if (v["txid"], v["vout"]) in outputs else self.others.get((v["txid"], v["vout"]))
+                    )
+                    if address:
+                        v["prevout"] = {"scriptPubKey": {"address": address}}
+            return decoded
         if method == "listsinceblock":
             since = int(params[0], 16)
             rows = [

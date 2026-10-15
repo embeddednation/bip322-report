@@ -80,6 +80,9 @@ dust = 1000                         # satoshi; see --dust
 [wallets.treasury]
 holder = "Company AB"
 node = "treasury-2of3-main"         # the node wallet, when its name is not the directory's
+
+[addresses]
+"bc1q…" = "Exchange"                # an address of theirs: the wallet it belongs to
 ```
 
 `bip322 init -w treasury` writes the file with every key shown, all but
@@ -88,6 +91,11 @@ node = "treasury-2of3-main"         # the node wallet, when its name is not the 
 Other keys: `cli` (how to reach the node), `timeout`, `theme`, `heading`,
 `explorer`. Without `-w` and outside a wallet's directory, `wallet` in the
 file names the wallet, else the node's one loaded wallet is it.
+`[addresses]` names the other side of a movement in the statement's CSV
+(its `wallet` column): a send by the addresses it paid, a receive by the
+addresses it came from, which the node reads from the block (Bitcoin Core 25
+or later, no `txindex` needed). An address nothing names leaves the cell
+empty, to fill in by hand.
 
 ## Install
 

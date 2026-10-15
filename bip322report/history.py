@@ -64,6 +64,7 @@ class WalletTx:
     others_in: int | None = None  # inputs that were not the wallet's; None in a history saved before this was recorded
     blockindex: int | None = None  # position in its block; None while unconfirmed, and in a history saved before this was recorded
     swept: bool = False  # not a transaction: dust entering the books in the block where the wallet spent it (History.without_dust)
+    payers: list[str] = field(default_factory=list)  # the addresses behind the inputs that were not the wallet's, when the node could tell
 
     @property
     def net_sat(self) -> int:
@@ -107,6 +108,7 @@ class WalletTx:
             "fee_btc": btc(self.fee_sat) if self.fee_sat is not None else None,
             "others_in": self.others_in,
             "blockindex": self.blockindex,
+            "payers": list(self.payers),
             "ours_in": [c.to_dict() for c in self.ours_in],
             "ours_out": [c.to_dict() for c in self.ours_out],
             "others_out": [c.to_dict() for c in self.others_out],
@@ -125,6 +127,7 @@ class WalletTx:
             d.get("fee_sat"),
             d.get("others_in"),
             d.get("blockindex"),
+            payers=[str(a) for a in d.get("payers") or []],
         )
 
 
@@ -185,13 +188,24 @@ class History:
         if not dust:
             return self
 
+        payers = {tx.txid: tx.payers for tx in self.txs}  # a swept coin came from whoever paid its transaction
+
         def rewrite(txs: list[WalletTx]) -> list[WalletTx]:
             out: list[WalletTx] = []
             for tx in txs:
                 kept = replace(tx, ours_out=[c for c in tx.ours_out if c.outpoint not in dust])
                 # booked now, in the spender's block and just before it; the coin keeps its outpoint, so the spend finds it
                 out += [
-                    WalletTx(c.txid, tx.height, tx.blockhash, tx.time, ours_out=[c], blockindex=tx.blockindex, swept=True)
+                    WalletTx(
+                        c.txid,
+                        tx.height,
+                        tx.blockhash,
+                        tx.time,
+                        ours_out=[c],
+                        blockindex=tx.blockindex,
+                        swept=True,
+                        payers=payers.get(c.txid, []),
+                    )
                     for c in tx.ours_in
                     if c.outpoint in dust
                 ]
@@ -313,9 +327,32 @@ def fetch_history(cli: BitcoinCli, *, progress=None) -> History:
             fee,
             len(vin) - len(ours_in),
             int(tx["blockindex"]) if height is not None and tx.get("blockindex") is not None else None,
+            payers=_payers(cli, tx, known) if height is not None and len(ours_in) < len(vin) else [],
         )
         (txs if height is not None else pending).append(entry)
     return History(chain, wallet_name, tip_height, tip_hash, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), _chain_order(txs), pending)
+
+
+def _payers(cli: BitcoinCli, tx: dict, known: dict[Outpoint, Coin]) -> list[str]:
+    """The addresses behind the inputs that were not the wallet's, in input order without repeats.
+
+    ``getrawtransaction`` at verbosity 2 with the block named reads each input's
+    ``prevout`` from the block's undo data, so no ``txindex`` is needed (Bitcoin
+    Core 25 and later).  An older or pruned node, or a transaction the node cannot
+    open that way, gives no payers and no error: the other side stays unnamed.
+    """
+    try:
+        decoded = cli.call("getrawtransaction", tx["txid"], 2, tx["blockhash"])
+    except RpcError:
+        return []
+    found: list[str] = []
+    for v in (decoded or {}).get("vin", []):
+        if "coinbase" in v or (v.get("txid"), int(v.get("vout", -1))) in known:
+            continue
+        address = ((v.get("prevout") or {}).get("scriptPubKey") or {}).get("address")
+        if address and address not in found:
+            found.append(address)
+    return found
 
 
 def _given_up(cli: BitcoinCli, tx: dict) -> bool:

@@ -13,6 +13,7 @@ from bip322report.render import render_html, write_csv
 from bip322report.report import build_report
 
 OTHER = "bc1qexternal0000000000000000000000000000000ext"
+EXCHANGE = "bc1qexchange0000000000000000000000000000000xch"
 A, B, C, D, E = ("a1" * 32, "b2" * 32, "c3" * 32, "d4" * 32, "e5" * 32)
 
 
@@ -156,15 +157,15 @@ def test_a_transaction_funded_with_others_is_mixed_and_its_fee_unknown(tmp_path,
     assert '<td>mixed</td><td class="num">0.00050000</td><td class="num"><span class="muted">unknown</span></td>' in html
     assert 'the holdings of section 2</td><td class="num">0.00020000</td><td class="num">(0.00001000)</td>' in html  # the sum of the rows
     assert "mixed 0.00050000, fee unknown" in html and "its fee is unknown" in html
-    write_csv(report, tmp_path / "x.csv")
+    write_csv(report, tmp_path / "x.csv")  # the CSV's amount is the net, fee inside, so the balance is its running sum
     rows = list(csv.DictReader((tmp_path / "x.csv").open()))
-    assert [(r["kind"], r["amount_btc"], r["fee_btc"]) for r in rows] == [
-        ("mixed", "0.00050000", "unknown"),
-        ("send", "-0.00030000", "0.00001000"),
+    assert [(r["category"], r["amount"], r["balance"]) for r in rows] == [
+        ("mixed", "0.00050000", "0.00150000"),
+        ("send", "-0.00031000", "0.00119000"),
     ]
     write_csv(_report(node, rates=Rates.constant_rate("SEK", "1000000")), tmp_path / "sek.csv")
-    fees = [(r["fee_btc"], r["fee_fiat"]) for r in csv.DictReader((tmp_path / "sek.csv").open())]
-    assert fees == [("unknown", "unknown"), ("0.00001000", "10.00")]
+    valued = [(r["rate"], r["amount_fiat"]) for r in csv.DictReader((tmp_path / "sek.csv").open())]
+    assert valued == [("1000000", "500.00"), ("1000000", "-310.00")]
     # a history saved before the inputs were counted: a transaction of ours without a fee was funded by others too
     old = history.to_dict()
     for tx in old["transactions"]:
@@ -194,7 +195,7 @@ def test_a_payment_to_an_output_without_an_address_is_a_send(tmp_path, wallet):
     assert report["totals"]["sent_sat"] == 40_000 and report["transactions"][0]["others_out"][0]["address"] is None
     assert "paid out 0.00040000" in render_html(report)
     write_csv(report, tmp_path / "x.csv")
-    assert next(csv.DictReader((tmp_path / "x.csv").open()))["others_out"] == "no-address=0.00040000"
+    assert next(csv.DictReader((tmp_path / "x.csv").open()))["wallet"] == ""  # a bare script belongs to no named wallet
 
 
 # ---- order within a block --------------------------------------------------- #
@@ -240,3 +241,46 @@ def test_abandoned_and_replaced_transactions_are_not_unconfirmed(wallet):
     assert [tx.txid for tx in history.pending] == [C, E, "18" * 32] and [tx.txid for tx in history.txs] == [A, B]
     report = _report(node, 980, 1010)
     assert [t["txid"] for t in report["pending_transactions"]] == [C, E, "18" * 32] and report["closing"]["total_sat"] == 300_000
+
+
+# ---- the other side ------------------------------------------------------- #
+
+
+def test_the_other_side_of_a_movement_is_named_by_the_addresses_table(tmp_path, wallet):
+    """A receive's payers come from the node (getrawtransaction's prevouts), a send's payees from its outputs; [addresses] names them."""
+    from bip322audit.rpc import RpcError
+
+    node, (a0, a1, a2, _) = _wallet_node(wallet)
+    node.others[(OTHER, 0)] = EXCHANGE
+    node.add(A, 1001, [(OTHER, 0)], [(a0, 100_000)])  # received from the exchange
+    node.add(B, 1003, [(A, 0)], [(OTHER, 40_000), (a1, 59_000)])  # sent to it, change back
+    node.add(C, 1005, [(B, 1)], [(a2, 58_000)])  # internal
+    history = fetch_history(node)
+    assert [tx.payers for tx in history.txs] == [[EXCHANGE], [], []]
+    assert History.from_dict(history.to_dict()).txs[0].payers == [EXCHANGE]
+    names = {EXCHANGE: "Exchange", OTHER: "Exchange"}
+    report = build_report(history, period_for_heights(node, 1000, 1010), label="treasury", cli=None, addresses=names)
+    assert [t["counterpart"] for t in report["transactions"]] == ["Exchange", "Exchange", "treasury"]
+    write_csv(report, tmp_path / "t.csv")
+    rows = list(csv.DictReader((tmp_path / "t.csv").open()))
+    assert list(rows[0]) == ["time", "txid", "category", "amount", "balance", "wallet"]
+    assert [(r["category"], r["amount"], r["balance"], r["wallet"]) for r in rows] == [
+        ("receive", "0.00100000", "0.00100000", "Exchange"),
+        ("send", "-0.00041000", "0.00059000", "Exchange"),
+        ("internal", "-0.00001000", "0.00058000", "treasury"),
+    ]
+    assert [t["counterpart"] for t in _report(node, 1000, 1010)["transactions"]] == ["", "", "x"]  # unnamed: to fill in by hand
+    # a node that cannot open the transaction that way (older than Core 25, or pruned): no payers, no error
+    plain = FakeNode(tip=1010)
+    plain.mine, plain.txs, plain.order = node.mine, node.txs, node.order
+    plain.call, original = (
+        (lambda m, *p: (_ for _ in ()).throw(RpcError("no undo data")) if m == "getrawtransaction" else original(m, *p)),
+        plain.call,
+    )
+    assert [tx.payers for tx in fetch_history(plain).txs] == [[], [], []]
+    # a payer's dust, swept later, is still booked as theirs
+    node.add(D, 1006, [(OTHER, 1)], [(a0, 500)])
+    node.others[(OTHER, 1)] = EXCHANGE
+    node.add(E, 1008, [(D, 0), (C, 0)], [(a1, 58_000)])
+    swept = build_report(fetch_history(node), period_for_heights(node, 1000, 1010), label="t", cli=None, addresses=names, dust_sat=1000)
+    assert [(t["kind"], t["counterpart"]) for t in swept["transactions"]][-2:] == [("swept", "Exchange"), ("internal", "t")]

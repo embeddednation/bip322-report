@@ -1,6 +1,8 @@
 """The command line: what it refuses before any work, how it names and copies proofs files, and what it exits with."""
 
+import csv
 import json
+import os
 import re
 import shutil
 import tomllib
@@ -438,3 +440,28 @@ def test_inside_a_wallets_directory_that_wallet_is_meant(bundles, wallet, run, t
     code, out, err = run(node, "report", *HEIGHTS)
     assert code == 0 and out.strip() == str(tmp_path / "bip322" / "books" / "statements" / "979..1000")
     assert _written(out.strip(), ".json").name == "books-979..1000.json"
+
+
+def test_the_addresses_table_names_the_other_side_in_the_csv(wallet, run, tmp_path):
+    """[addresses] in bip322.toml: the wallet column of the CSV, from a receive's payers and a send's payees."""
+    node = FakeNode(tip=1000)
+    a0, a1 = wallet.derive(0).address, wallet.derive(1).address
+    node.mine |= {a0, a1}
+    exchange = "bc1qexchange0000000000000000000000000000000xch"
+    node.others[("ff" * 32, 0)] = exchange
+    node.add("aa" * 32, 990, [("ff" * 32, 0)], [(a0, 100_000)])
+    node.add("bb" * 32, 995, [("aa" * 32, 0)], [(exchange, 30_000), (a1, 69_000)])
+    data_dir = Path(os.environ["BIP322_DIR"])
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "bip322.toml").write_text(f'[addresses]\n"{exchange}" = "Exchange"\n')
+    code, out, err = run(node, "-w", "watch", "report", "--from-height", "980", "--to-height", "1000", "-o", "named")
+    assert code == 1 and "ATTENTION" in err  # no proofs: the statement is written all the same
+    rows = list(csv.DictReader(_written("named", ".csv").open()))
+    assert list(rows[0]) == ["time", "txid", "category", "amount", "balance", "wallet"]
+    assert [(r["category"], r["amount"], r["balance"], r["wallet"]) for r in rows] == [
+        ("receive", "0.00100000", "0.00100000", "Exchange"),
+        ("send", "-0.00031000", "0.00069000", "Exchange"),
+    ]
+    (data_dir / "bip322.toml").write_text('[addresses]\n"bc1q" = 3\n')
+    code, out, err = run(node, "-w", "watch", "report", "--from-height", "980", "--to-height", "1000", "-o", "bad")
+    assert code == 2 and "[addresses] must map each address to the name of the wallet" in err and not Path("bad").exists()

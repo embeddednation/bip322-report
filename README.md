@@ -80,7 +80,9 @@ The wallet is `-w NAME`, else the wallet directory the command runs in, else
 `wallet` in `bip322.toml`, else the node's one loaded wallet; `-o DIR` writes the
 statement elsewhere, `--dir DIR` names the data directory from elsewhere. The tree and the configuration file are described in bip322-audit's README and the
 handbook; the keys this package reads are `wallet`, `cli`, `holder`,
-`dust`, `theme`, `heading`, `explorer`, and `node` per wallet.
+`dust`, `theme`, `heading`, `explorer`, `node` per wallet, and the
+`[addresses]` table: the wallet each address of someone else belongs to
+(`"bc1q..." = "Exchange"`), which names the other side of a movement.
 
 `bip322 report` prints a summary on stderr and the directory on stdout. For the
 year, made in January from the year-end snapshot:
@@ -241,9 +243,14 @@ The wallet is named by the node wallet's name; `--holder NAME` puts the holder's
   `internal` (everything came back), and `mixed` for a transaction funded
   by the wallet and by others, whose fee is unknown and shown as such and
   whose amount is the wallet's net. Within a block, movements follow their
-  position in the block. The CSV and the JSON add the net and the outputs
-  on each side: for a payment the address paid, or no address for an
-  output that has none (`no-address` in the CSV, null in the JSON).
+  position in the block. The JSON adds the net, the outputs on each side
+  (for a payment the address paid, or null for an output that has none),
+  the addresses a receive came from when the node can tell, and the other
+  side's wallet as `[addresses]` names it. The CSV is the movements for a
+  spreadsheet: `time, txid, category, amount, balance, wallet`, the amount
+  being the wallet's net with the fee inside, the balance its running sum,
+  and the wallet the other side's name, empty when nothing names it, to
+  fill in by hand; `rate` and `amount_fiat` follow when rates are given.
   Unconfirmed transactions are listed apart and count in no balance;
   abandoned and replaced ones are not listed.
 

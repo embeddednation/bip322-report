@@ -1,4 +1,4 @@
-"""report.html, transactions.csv and, when WeasyPrint is installed, report.pdf."""
+"""The statement as HTML, the movements as CSV and, when WeasyPrint is installed, the PDF."""
 
 from __future__ import annotations
 
@@ -334,32 +334,25 @@ def _font_url(file: str, fonts_url: str | None) -> str:
 
 
 def write_csv(report: dict, path: Path) -> None:
+    """The movements for a spreadsheet: time, txid, category, amount (the wallet's net, fee inside), balance (the running sum of
+    the amounts) and wallet (the other side, as ``[addresses]`` in bip322.toml names it; empty to fill in by hand), then rate and
+    amount_fiat when rates were given."""
     fiat = report.get("fiat")
-    fields = (
-        ["time_utc", "height", "txid", "kind", "amount_btc", "fee_btc", "net_btc"]
-        + (["rate", "amount_fiat", "fee_fiat", "net_fiat"] if fiat else [])
-        + ["ours_in", "ours_out", "others_out"]
-    )
+    fields = ["time", "txid", "category", "amount", "balance", "wallet"] + (["rate", "amount_fiat"] if fiat else [])
     with Path(path).open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=fields)
         w.writeheader()
         for tx in report["transactions"]:
-            row = {k: tx.get(k) for k in ("time_utc", "height", "txid", "kind", "amount_btc", "fee_btc", "net_btc")}
+            row = {
+                "time": tx["time_utc"],
+                "txid": tx["txid"],
+                "category": tx["kind"],
+                "amount": tx["net_btc"],
+                "balance": tx["balance_after_btc"],
+                "wallet": tx["counterpart"],
+            }
             if fiat:
-                row.update(
-                    {
-                        "rate": tx["fiat"]["rate"],
-                        "amount_fiat": tx["fiat"]["amount"],
-                        "fee_fiat": tx["fiat"]["fee"],
-                        "net_fiat": tx["fiat"]["net"],
-                    }
-                )
-            if tx["kind"] == "mixed":  # others funded it too: an empty fee cell would read as none
-                row["fee_btc"] = "unknown"
-                if fiat:
-                    row["fee_fiat"] = "unknown"
-            for key in ("ours_in", "ours_out", "others_out"):
-                row[key] = " ".join(f"{c['address'] or 'no-address'}={c['amount_btc']}" for c in tx[key])
+                row.update({"rate": tx["fiat"]["rate"], "amount_fiat": tx["fiat"]["net"]})
             w.writerow(row)
 
 

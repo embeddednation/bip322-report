@@ -39,8 +39,12 @@ def build_report(
     progress=None,
     onchain: bool = True,
     dust_sat: int = 0,
+    addresses: dict[str, str] | None = None,
 ) -> dict:
     """The report as a plain dict (what report.json holds and the templates render).
+
+    ``addresses`` is ``[addresses]`` of ``bip322.toml``: the wallet each address of
+    someone else belongs to, which names the other side of a movement (``counterpart``).
 
     ``cli`` is needed to re-verify the proofs files under ``proofs_roots`` against the chain and to
     cross-check the closing balance with ``listunspent`` when the period runs
@@ -72,7 +76,7 @@ def build_report(
     _verify_addresses(closing_addresses, engines)
     scripts = {a["address"]: a["script"]["script_pubkey"] for a in closing_addresses}
     onchain_result = _onchain(cli, closing_rows, period, scripts, progress) if cli is not None and onchain and closing_rows else None
-    tx_rows, totals = _movement_rows(movements, opening_sat, rates)
+    tx_rows, totals = _movement_rows(movements, opening_sat, rates, addresses or {}, label)
     net_sat = totals["net_sat"]
 
     report = {
@@ -184,8 +188,25 @@ def _fiat(rates: Rates, tx: WalletTx, amount: int) -> dict:
     }
 
 
-def _movement_rows(movements: list[WalletTx], opening_sat: int, rates: Rates | None) -> tuple[list[dict], dict]:
-    """The period's transactions as rows with a running balance, and the totals of the period."""
+def _counterpart(tx: WalletTx, names: dict[str, str], own: str) -> str:
+    """The wallet on the other side: the wallet itself for an internal move, else the names ``[addresses]`` gives the
+    addresses there (paid by a send, paying a receive; both for a mixed one), "" when it names none."""
+    if tx.kind == "internal":
+        return own
+    theirs = [c.address for c in tx.others_out if c.address] if tx.kind in ("send", "mixed") else []
+    theirs += tx.payers if tx.kind in ("receive", "swept", "mixed") else []
+    found: list[str] = []
+    for address in theirs:
+        name = names.get(address)
+        if name is not None and name not in found:
+            found.append(name)
+    return ", ".join(found)
+
+
+def _movement_rows(
+    movements: list[WalletTx], opening_sat: int, rates: Rates | None, names: dict[str, str], own: str
+) -> tuple[list[dict], dict]:
+    """The period's transactions as rows with a running balance and the other side named, and the totals of the period."""
     rows = []
     received = sent = fees = mixed = mixed_count = 0
     running = opening_sat
@@ -194,6 +215,7 @@ def _movement_rows(movements: list[WalletTx], opening_sat: int, rates: Rates | N
         running += tx.net_sat
         row["balance_after_sat"] = running
         row["balance_after_btc"] = btc(running)
+        row["counterpart"] = _counterpart(tx, names, own)
         # what moved between the wallet and others, before the fee: received, or (sent).  A mixed transaction's fee is
         # unknown (others funded it too), so its amount is the wallet's net and no fee is stated for it.
         amount = tx.net_sat + (tx.fee_sat or 0)

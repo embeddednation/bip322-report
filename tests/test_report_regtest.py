@@ -4,7 +4,9 @@ Skipped when no Bitcoin Core binary is found: set BITCOIN_CORE_DIR to a Core ins
 or run refcheck/fetch.sh in a bip322-core checkout that is installed alongside.
 """
 
+import csv
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -118,6 +120,8 @@ def test_reports_workflow_on_regtest(core, regtest_wallet, signer_expressions, p
     # ---- the report over the whole life of the wallet -------------------------- #
     history = fetch_history(watch)
     assert len(history.txs) == 3 and history.balance_at(103) == 60_000_000 and history.tip_height == 105
+    payers = [tx.payers for tx in history.txs if tx.kind == "receive"]  # prevouts from the block's undo data, no txindex
+    assert payers[0] == [mine_to] and len(payers[1]) == 1 and payers[1][0].startswith("bcrt1")  # the second: the miner's change
     spend = next(tx for tx in history.txs if tx.txid == spend_txid)
     assert (
         spend.kind == "send"
@@ -160,3 +164,18 @@ def test_reports_workflow_on_regtest(core, regtest_wallet, signer_expressions, p
     )
     written = json.loads((out / f"watch-{YEAR}.json").read_text())
     assert written["ok"] and written["label"] == "watch" and (out / f"watch-{YEAR}.html").exists() and (out / f"watch-{YEAR}.csv").exists()
+    assert [t["counterpart"] for t in written["transactions"]] == ["", "", ""]  # nothing named the miner yet
+    data_dir = Path(os.environ["BIP322_DIR"])
+    data_dir.mkdir(parents=True, exist_ok=True)
+    miners = {a for tx in history.txs for a in tx.payers} | {mine_to}
+    (data_dir / "bip322.toml").write_text("[addresses]\n" + "".join(f'"{a}" = "miner"\n' for a in sorted(miners)))
+    named = tmp_path / "named"
+    assert (
+        cli_module.main(
+            ["--cli", cli_arg, "-w", "watch", "report", "--year", str(YEAR), "--snapshots", str(ledger), "--html", "-o", str(named)]
+        )
+        == 0
+    )
+    rows = list(csv.DictReader((named / f"watch-{YEAR}.csv").open()))
+    assert [(r["category"], r["wallet"]) for r in rows] == [("receive", "miner"), ("receive", "miner"), ("send", "miner")]
+    assert rows[-1]["balance"] == written["closing"]["total_btc"]

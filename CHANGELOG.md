@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.12.0 (2026-10-15)
+
+Needs bip322-audit 0.16.
+
+- The CSV is the movements for a spreadsheet, six columns: `time`, `txid`,
+  `category`, `amount` (the wallet's net, fee inside), `balance` (the
+  running sum) and `wallet` (the other side), then `rate` and
+  `amount_fiat` when rates are given. The fee, heights and outputs stay in
+  the JSON.
+- `[addresses]` in `bip322.toml` names the other side: a send by the
+  addresses it paid, a receive by the addresses it came from, which the
+  history now records (`payers`, from the block's undo data; Bitcoin Core
+  25 or later). The JSON rows carry it as `counterpart`.
+
 ## 0.11.1 (2026-10-15)
 
 Needs bip322-core 0.12 and bip322-audit 0.15.1: `bip322 checksigners
