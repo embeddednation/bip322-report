@@ -102,22 +102,21 @@ class _Switch(BitcoinCli):
 
 
 def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
-    """bip322 report holder: the holder from bip322.toml, its wallets the directories, the ledger to date under holders/."""
+    """bip322 report holder: the holder is a directory, its wallets the directories under it, the ledger to date in its statements/."""
     nodes, _ = _two_wallets(wallet)
     monkeypatch.setattr(cli_module, "BitcoinCli", lambda command: _Switch(nodes))
     monkeypatch.setattr(cli_module, "_pdf_possible", lambda: False)
     root = Path(os.environ["BIP322_DIR"])
     for name in ("treasury", "cold"):
-        (root / name / "snapshots").mkdir(parents=True)
+        (root / "company" / name / "snapshots").mkdir(parents=True)
     (root / "bip322.toml").write_text(
-        '[holders.company]\nname = "Company AB"\nwallets = ["cold", "treasury"]\n\n'
-        f'[addresses]\n"{EXCHANGE}" = "Exchange"\n"{OTHER}" = "Exchange"\n'
+        f'[holders.company]\nname = "Company AB"\n\n[addresses]\n"{EXCHANGE}" = "Exchange"\n"{OTHER}" = "Exchange"\n'
     )
     monkeypatch.chdir(root)
     assert cli_module.main(["holder"]) == 1  # the one holder needs no naming; no proofs: ATTENTION, the ledger is written all the same
     out, err = capsys.readouterr()
     date = datetime.fromtimestamp(block_time(1010), UTC).strftime("%Y-%m-%d")
-    assert out.strip() == str(root / "holders" / "company" / date) and "wallets: cold 0.00000000 BTC, treasury 0.00078000 BTC" in err
+    assert out.strip() == str(root / "company" / "statements" / date) and "wallets: cold 0.00000000 BTC, treasury 0.00078000 BTC" in err
     directory = Path(out.strip())
     assert sorted(p.name for p in directory.iterdir()) == [f"company-{date}.csv", f"company-{date}.html", f"company-{date}.json"]
     written = json.loads((directory / f"company-{date}.json").read_text())
@@ -131,20 +130,28 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
         ("transfer", "cold -> treasury"),
     ]
     assert rows[-1]["balance"] == "0.00078000"
-    # a period, as for a wallet's statement; the holder named by its key
+    # a period, as for a wallet's statement; the holder named by its directory
     assert cli_module.main(["holder", "company", "--from-height", "1004", "--to-height", "1010"]) == 1
     out, _ = capsys.readouterr()
-    assert out.strip() == str(root / "holders" / "company" / "1004..1010")
-    (root / "bip322.toml").write_text(
-        '[holders.company]\nname = "Company AB"\nwallets = ["treasury"]\n\n[holders.jonas]\nwallets = ["cold"]\n'
+    assert out.strip() == str(root / "company" / "statements" / "1004..1010")
+    # a second holder: cold moves under it; then the holder must be named, or be the current directory's, or bip322.toml's
+    (root / "jonas").mkdir()
+    (root / "company" / "cold").rename(root / "jonas" / "cold")
+    assert (
+        cli_module.main(["holder"]) == 2
+        and "which holder? bip322 report holder KEY (holders here: company, jonas)" in capsys.readouterr().err
     )
-    assert cli_module.main(["holder"]) == 2 and "which holder? one of: company, jonas" in capsys.readouterr().err
     assert cli_module.main(["holder", "jonas", "-o", str(tmp_path / "jonas")]) == 0  # cold holds nothing at the end: nothing to cover
     written = json.loads((tmp_path / "jonas" / f"jonas-{date}.json").read_text())
     assert written["label"] == "jonas" and [w["name"] for w in written["wallets"]] == ["cold"]
+    monkeypatch.chdir(root / "jonas" / "cold")
+    assert cli_module.main(["holder", "-o", str(tmp_path / "here")]) == 0 and (tmp_path / "here" / f"jonas-{date}.json").exists()
+    monkeypatch.chdir(root)
+    (root / "bip322.toml").write_text('holder = "jonas"\n')
+    assert cli_module.main(["holder", "-o", str(tmp_path / "default")]) == 0 and (tmp_path / "default" / f"jonas-{date}.json").exists()
     assert cli_module.main(["holder", "nobody", "-o", str(tmp_path / "nobody")]) == 2
-    assert "no [holders.nobody] in bip322.toml (holders: company, jonas)" in capsys.readouterr().err
-    (root / "bip322.toml").write_text("")
-    assert cli_module.main(["holder"]) == 2 and "no holder in bip322.toml" in capsys.readouterr().err
-    (root / "bip322.toml").write_text('[holders.a]\nwallets = ["x"]\n[holders.b]\nwallets = ["x"]\n')
-    assert cli_module.main(["holder", "a"]) == 2 and "listed under two holders" in capsys.readouterr().err
+    assert f"no wallet under {root / 'nobody'} yet" in capsys.readouterr().err
+    (root / "jonas" / "treasury" / "snapshots").mkdir(parents=True)  # the same wallet name under two holders
+    assert (
+        cli_module.main(["holder", "company"]) == 2 and "wallet treasury is under two holders, company and jonas" in capsys.readouterr().err
+    )

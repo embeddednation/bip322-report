@@ -203,7 +203,7 @@ def test_options_that_contradict_or_point_nowhere_are_refused_before_any_work(bu
     Path("taken/file").write_text("x")
     code, _, err = run(node, "report", *HEIGHTS, "--snapshots", bundles / "full", "-o", "taken")
     assert code == 2 and "taken exists and is not empty" in err and node.calls == []
-    default = tmp_path / "bip322" / "watch" / "statements" / "979..1000"  # the data directory: BIP322_DIR, set per test
+    default = tmp_path / "bip322" / "h" / "watch" / "statements" / "979..1000"  # the data directory: BIP322_DIR, set per test
     default.mkdir(parents=True)
     (default / "file").write_text("x")
     code, _, err = run(node, "report", *HEIGHTS)
@@ -413,10 +413,11 @@ def test_wallet_and_dir_go_before_or_after_any_command(bundles, wallet, run, tmp
     """-w and --dir are taken on either side of every command, and --dir beats BIP322_DIR."""
     node = _node(wallet, tip=1000)
     elsewhere = tmp_path / "elsewhere"
-    _place(bundles, elsewhere / "watch" / "snapshots" / "full", "full")
+    _place(bundles, elsewhere / "h" / "watch" / "snapshots" / "full", "full")
     code, out, err = run(node, "report", *HEIGHTS, "--dir", elsewhere, "-w", "watch")
-    assert code == 0 and "RESULT: OK" in err and out.strip() == str(elsewhere / "watch" / "statements" / "979..1000")
-    assert _written(out.strip(), ".json").name == "watch-979..1000.json" and not (tmp_path / "bip322").exists()
+    assert code == 0 and "RESULT: OK" in err and out.strip() == str(elsewhere / "h" / "watch" / "statements" / "979..1000")
+    assert _written(out.strip(), ".json").name == "watch-979..1000.json"
+    assert [p.name for p in (tmp_path / "bip322").iterdir()] == ["bip322.toml"]  # nothing written to BIP322_DIR
     code, _, err = run(node, "--dir", elsewhere, "report", *HEIGHTS, "-w", "watch")
     assert code == 2 and "exists and is not empty" in err  # the same place, found again
     for argv in (["block", "-w", "x", "2026-01-01"], ["history", "--dir", "d", "-w", "x"], ["report", "-y", "2026", "--dir", "d"]):
@@ -435,10 +436,10 @@ def test_the_sample_config_names_a_theme_and_a_heading_style_that_exist():
 def test_inside_a_wallets_directory_that_wallet_is_meant(bundles, wallet, run, tmp_path, monkeypatch):
     """Run in books/ (not the node wallet's name), the statement is books'; no -w, no asking the node which wallet."""
     node = _node(wallet, tip=1000)
-    _place(bundles, tmp_path / "bip322" / "books" / "snapshots" / "full", "full")
-    monkeypatch.chdir(tmp_path / "bip322" / "books")
+    _place(bundles, tmp_path / "bip322" / "h" / "books" / "snapshots" / "full", "full")
+    monkeypatch.chdir(tmp_path / "bip322" / "h" / "books")
     code, out, err = run(node, "report", *HEIGHTS)
-    assert code == 0 and out.strip() == str(tmp_path / "bip322" / "books" / "statements" / "979..1000")
+    assert code == 0 and out.strip() == str(tmp_path / "bip322" / "h" / "books" / "statements" / "979..1000")
     assert _written(out.strip(), ".json").name == "books-979..1000.json"
 
 
@@ -453,7 +454,7 @@ def test_the_addresses_table_names_the_other_side_in_the_csv(wallet, run, tmp_pa
     node.add("bb" * 32, 995, [("aa" * 32, 0)], [(exchange, 30_000), (a1, 69_000)])
     data_dir = Path(os.environ["BIP322_DIR"])
     data_dir.mkdir(parents=True, exist_ok=True)
-    (data_dir / "bip322.toml").write_text(f'[addresses]\n"{exchange}" = "Exchange"\n')
+    (data_dir / "bip322.toml").write_text(f'holder = "h"\n\n[addresses]\n"{exchange}" = "Exchange"\n')
     code, out, err = run(node, "-w", "watch", "report", "--from-height", "980", "--to-height", "1000", "-o", "named")
     assert code == 1 and "ATTENTION" in err  # no proofs: the statement is written all the same
     rows = list(csv.DictReader(_written("named", ".csv").open()))
@@ -462,20 +463,21 @@ def test_the_addresses_table_names_the_other_side_in_the_csv(wallet, run, tmp_pa
         ("receive", "0.00100000", "0.00100000", "Exchange"),
         ("send", "-0.00031000", "0.00069000", "Exchange"),
     ]
-    (data_dir / "bip322.toml").write_text('[addresses]\n"bc1q" = 3\n')
+    (data_dir / "bip322.toml").write_text('holder = "h"\n\n[addresses]\n"bc1q" = 3\n')
     code, out, err = run(node, "-w", "watch", "report", "--from-height", "980", "--to-height", "1000", "-o", "bad")
     assert code == 2 and "[addresses] must map each address to the name of the wallet" in err and not Path("bad").exists()
 
 
-def test_the_statement_header_names_the_holder_whose_table_lists_the_wallet(wallet, run, tmp_path):
+def test_the_statement_header_names_the_wallets_holder(wallet, run, tmp_path):
+    """The holder of a wallet is the directory it is under; [holders.KEY] name is the header, else the key; no holder, no header."""
     node = _node(wallet, tip=1000)
     data_dir = Path(os.environ["BIP322_DIR"])
-    data_dir.mkdir(parents=True, exist_ok=True)
-    (data_dir / "bip322.toml").write_text('holder = "Fallback"\n\n[holders.company]\nname = "Company AB"\nwallets = ["watch"]\n')
-    code, out, err = run(node, "-w", "watch", "report", *HEIGHTS, "-o", "h")
-    assert json.loads(_written("h", ".json").read_text())["holder"] == "Company AB"
-    (data_dir / "bip322.toml").write_text('holder = "Fallback"\n\n[holders.company]\nname = "Company AB"\nwallets = ["cold"]\n')
-    run(node, "-w", "watch", "report", *HEIGHTS, "-o", "f")
-    assert json.loads(_written("f", ".json").read_text())["holder"] == "Fallback"
-    run(node, "-w", "watch", "report", *HEIGHTS, "-o", "g", "--holder", "Given")
-    assert json.loads(_written("g", ".json").read_text())["holder"] == "Given"
+    (data_dir / "h" / "watch" / "snapshots").mkdir(parents=True)
+    (data_dir / "bip322.toml").write_text('[holders.h]\nname = "Company AB"\n')
+    run(node, "-w", "watch", "report", *HEIGHTS, "-o", "named")
+    assert json.loads(_written("named", ".json").read_text())["holder"] == "Company AB"
+    (data_dir / "bip322.toml").write_text("")
+    run(node, "-w", "watch", "report", *HEIGHTS, "-o", "bare")
+    assert json.loads(_written("bare", ".json").read_text())["holder"] == "h"
+    run(node, "-w", "elsewhere", "report", *HEIGHTS, "-o", "none")
+    assert json.loads(_written("none", ".json").read_text())["holder"] is None  # not in the tree: nobody's

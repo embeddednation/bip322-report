@@ -43,32 +43,38 @@ A directory the holder chooses, made once with `bip322 init`: it writes
 `bip322.toml`, which marks the directory and holds the defaults, and from
 then on every command run in it or below finds it, as git finds its
 repository (`--dir DIR` or `BIP322_DIR` name it from elsewhere). Inside, one
-directory per wallet; the tools name everything else. `-w` names the wallet,
-or the wallet directory the command runs in does, and the wallet names the
-rest:
+directory per holder and, under it, one per wallet; the tools name everything
+else. `-w` names the wallet, or the wallet directory the command runs in
+does, and the wallet names the rest:
 
 ```
 ~/bip322/                                 # wherever bip322 init was run
   bip322.toml
-  treasury/
-    snapshots/
-      2026-03-02-880412/                  # a prove during the year
-      2026-10-09-920114/                  # the year-end snapshot
-        snapshot.json  message.txt  to_sign/  signed/
-        treasury-2026-10-09-920114-proofs.json
-    statements/
-      2026/
-        treasury-2026.pdf  treasury-2026.json  treasury-2026.csv
-        treasury-2026-10-09-920114-proofs.json
-  holders/
-    company/                              # [holders.company] in bip322.toml
-      2026-10-15/                         # the holder's ledger to date: its wallets, as one
+  company/                                # a holder
+    treasury/                             # a wallet of the holder
+      snapshots/
+        2026-03-02-880412/                # a prove during the year
+        2026-10-09-920114/                # the year-end snapshot
+          snapshot.json  message.txt  to_sign/  signed/
+          treasury-2026-10-09-920114-proofs.json
+      statements/
+        2026/
+          treasury-2026.pdf  treasury-2026.json  treasury-2026.csv
+          treasury-2026-10-09-920114-proofs.json
+    cold/
+      snapshots/
+    statements/                           # the holder's ledgers over its wallets
+      2026-10-15/                         # to date: labelled by the tip's date
         company-2026-10-15.pdf  .json  .csv  + the proofs files it cites
 ```
 
 Directories are named for their place, so the names stay bare; files that
-leave the tree carry wallet, time and kind in their name. A second wallet
-is a second directory, created the first time a command writes into it.
+leave the tree carry wallet (or holder), time and kind in their name. A
+wallet's name is unique in the tree, so `-w NAME` finds it under whichever
+holder it is. A second wallet is a second directory, created the first time
+a command writes into it: under the holder `-w KEY/NAME` names, else the
+holder whose directory the command runs in, else `holder` in `bip322.toml`,
+else the tree's one holder.
 The snapshots hold the PSBTs, which carry the wallet's xpubs: they stay with
 the holder, and are backed up like the wallet's own records. The statements
 are what leaves.
@@ -77,23 +83,23 @@ In `bip322.toml`, top-level keys are defaults for every wallet, a
 `[wallets.NAME]` table is for one, and the command line beats both:
 
 ```toml
+holder = "company"                  # the default holder: a new -w NAME is made in its directory
 wallet = "treasury"                 # the default -w
 text = "Proof of control {date}"    # the message template
 dust = 1000                         # satoshi; see --dust
 
+[holders.company]
+name = "Company AB"                 # the statements' header (default: the key)
+
 [wallets.treasury]
 node = "treasury-2of3-main"         # the node wallet, when its name is not the directory's
-
-[holders.company]                   # bip322 report holder company: one ledger over its wallets
-name = "Company AB"                 # the statements' header
-wallets = ["treasury", "cold"]
 
 [addresses]
 "bc1q…" = "Exchange"                # an address of theirs: the wallet it belongs to
 ```
 
-`bip322 init -w treasury` writes the file with every key shown, all but
-`wallet` and its table as comments to switch on.
+`bip322 init -w company/treasury` writes the file with every key shown, all
+but `holder`, `wallet` and their tables as comments to switch on.
 
 Other keys: `cli` (how to reach the node), `timeout`, `theme`, `heading`,
 `explorer`. Without `-w` and outside a wallet's directory, `wallet` in the
@@ -109,15 +115,14 @@ empty, to fill in by hand.
 A holder with several wallets gets one ledger over all of them:
 
 ```sh
-bip322 report holder company          # -> holders/company/2026-10-15/: company-2026-10-15.pdf (or .html), .json, .csv
+bip322 report holder company          # -> company/statements/2026-10-15/: company-2026-10-15.pdf (or .html), .json, .csv
 ```
 
-A holder is a `[holders.KEY]` table in `bip322.toml`: `name`, as the
-statements put it, and `wallets`, the wallet directories that are the
-holder's. The key is the holder's directory name under `holders/`, and may
-be left off the command when there is one holder. A wallet is listed under
-one holder only; a wallet's own statement takes the holder's name from the
-table that lists it. The wallets' histories merge: a transaction that moves coins from one of the holder's
+A holder is a directory of the tree, and its wallets are the wallet
+directories under it; `[holders.KEY]` in `bip322.toml` gives the name the
+statements put in their header, else the directory's name is it. The holder
+may be left off the command inside its directory, with `holder = KEY` in
+`bip322.toml`, or when the tree has one holder. The wallets' histories merge: a transaction that moves coins from one of the holder's
 wallets to another is one movement of kind `transfer`, its fee the only
 cost, and the balance is the holder's total, each wallet's beside it in the
 JSON and the statement. Without a period the ledger runs from the block

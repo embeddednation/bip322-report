@@ -63,9 +63,9 @@ to PDF from a browser), and `report` says so; `--html` asks for that.
 ## The flow
 
 ```sh
-# everything under treasury/ in the directory bip322 init made: the snapshots bip322-audit writes, the statements this writes.
+# everything under company/treasury/ in the directory bip322 init made: the snapshots bip322-audit writes, the statements this writes.
 # before broadcasting a spend: prove its change address
-bip322 audit prove bc1q...change...   # -> treasury/snapshots/<date>-<height>/
+bip322 audit prove bc1q...change...   # -> company/treasury/snapshots/<date>-<height>/
 #   sign to_sign/*.psbt on the cosigners' devices, put the results in signed/, then
 bip322 audit finalize                 # the newest snapshot; valid -> broadcast
 # anything that arrived on addresses not yet proven (deposits):
@@ -73,25 +73,25 @@ bip322 audit snapshot --skip-proven
 
 # the year's statement
 bip322 report --year 2026
-#   -> treasury/statements/2026/: treasury-2026.pdf (or .html), .json, .csv, and the proofs files it cites
+#   -> company/treasury/statements/2026/: treasury-2026.pdf (or .html), .json, .csv, and the proofs files it cites
 
-# the holder's ledger over its wallets ([holders.company] in bip322.toml), from the first reception to now
+# the holder's ledger over every wallet under company/, from the first reception to now
 bip322 report holder company
-#   -> holders/company/2026-10-15/: company-2026-10-15.pdf (or .html), .json, .csv, and the proofs files it cites
+#   -> company/statements/2026-10-15/: company-2026-10-15.pdf (or .html), .json, .csv, and the proofs files it cites
 ```
 
 The wallet is `-w NAME`, else the wallet directory the command runs in, else
 `wallet` in `bip322.toml`, else the node's one loaded wallet; `-o DIR` writes the
 statement elsewhere, `--dir DIR` names the data directory from elsewhere. The tree and the configuration file are described in bip322-audit's README and the
-handbook; the keys this package reads are `wallet`, `cli`, `holder`,
-`dust`, `theme`, `heading`, `explorer`, `node` per wallet, and the
+handbook; the keys this package reads are `holder`, `wallet`, `cli`,
+`dust`, `theme`, `heading`, `explorer`, `node` per wallet, `name` per holder, and the
 `[addresses]` table: the wallet each address of someone else belongs to
 (`"bc1q..." = "Exchange"`), which names the other side of a movement.
-A `[holders.KEY]` table groups wallets: `name` (the statements' header)
-and `wallets`, the wallet directories that are the holder's. `bip322 report
-holder KEY` merges their histories into one ledger, a transfer between two
-of them one movement of kind `transfer`, the balance the holder's total,
-under `holders/KEY/<label>/`.
+A holder is a directory of the tree with its wallets' directories under it;
+`[holders.KEY]` gives its `name` for the statements' header. `bip322 report
+holder KEY` merges its wallets' histories into one ledger, a transfer between
+two of them one movement of kind `transfer`, the balance the holder's total,
+under `KEY/statements/<label>/`.
 
 `bip322 report` prints a summary on stderr and the directory on stdout. For the
 year, made in January from the year-end snapshot:
@@ -274,7 +274,7 @@ hold (older ones, another wallet's given with `--snapshots`) appears as a
 bare count.
 
 **What to hand over:** the statement directory,
-`<wallet>/statements/<label>/` in the data directory. Four kinds of file and nothing
+`<holder>/<wallet>/statements/<label>/` in the data directory. Four kinds of file and nothing
 else: `<wallet>-<label>.pdf` (or `.html`), `.json`, `.csv`, and a copy of
 each proofs file the statement cites, and no other, under its own name, so
 a reader can run `bip322 audit verify` on each. Never hand over the

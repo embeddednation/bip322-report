@@ -24,7 +24,7 @@ PORT=$(.venv/bin/python -m bip322audit.testing port)
 CLI="$CORE/bin/bitcoin-cli -regtest -datadir=$DATADIR -rpcport=$PORT -rpcuser=demo -rpcpassword=demo"
 DEV=.venv/bin/bip322-dev; AUDIT=.venv/bin/bip322-audit; REPORT=.venv/bin/bip322-report
 export BIP322_DIR="$WORK/bip322"   # the data directory for this run (in real life: cd into it and bip322 init)
-SNAPSHOTS="$BIP322_DIR/watch/snapshots"; STATEMENTS="$BIP322_DIR/watch/statements"
+SNAPSHOTS="$BIP322_DIR/demo/watch/snapshots"; STATEMENTS="$BIP322_DIR/demo/watch/statements"
 step() { printf '\n\033[1m=== %s ===\033[0m\n' "$*"; }
 run() { printf '$ %s\n' "$*" >&2; "$@"; }
 cleanup() { $CLI stop >/dev/null 2>&1 || true; sleep 1; rm -rf "$DATADIR"; }
@@ -64,6 +64,7 @@ $CLI -rpcwallet=miner sendtoaddress "$A0" 0.5 >/dev/null; $CLI -rpcwallet=miner 
 $CLI -rpcwallet=miner generatetoaddress 2 "$MINE" >/dev/null
 
 step "3. the owner proves everything once (the first snapshot under $SNAPSHOTS)"
+$AUDIT init -w demo/watch          # bip322.toml in $BIP322_DIR: holder = "demo", wallet = "watch"; the tree is demo/watch/
 sign_snapshot "$(run $AUDIT --cli "$CLI" -w watch snapshot --depth 1 --text "Proof of control {date}")"
 
 step "4. a payment is prepared; before broadcasting, the change address is proven (a snapshot joins the others)"

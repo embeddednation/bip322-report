@@ -24,7 +24,7 @@ def test_walkthrough_refuses_what_exists_and_is_not_empty_and_leaves_it_alone(tm
         assert done.stderr == f"error: {given} exists and is not an empty directory; give a new or empty one\n"
     assert [p.name for p in work.iterdir()] == ["keep.txt"] and (work / "keep.txt").read_text() == "mine\n"
     assert file.read_text() == "mine too\n"
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["a-file", "work"]  # nothing was created beside them either
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a-file", "bip322", "work"]  # nothing beside them (bip322/ is the fixture's)
 
 
 def test_walkthrough_removes_only_its_own_temporary_datadir():

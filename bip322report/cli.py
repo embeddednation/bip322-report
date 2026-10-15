@@ -20,9 +20,15 @@ from bip322audit.datadir import (
     Config,
     ConfigError,
     holder_dir,
+    holder_of_cwd,
+    holder_of_wallet,
+    holder_statements_dir,
+    holders,
+    name_wallet,
     snapshots_dir,
     statements_dir,
     use_data_dir,
+    wallet_dirs,
     wallet_of_cwd,
 )
 from bip322audit.proofs import find_proofs
@@ -54,7 +60,7 @@ def _wallet_name(args, config: Config) -> str | None:
     """The wallet as named by the owner: ``-w``, else the wallet directory the command runs in, else ``wallet`` in bip322.toml; None when none says."""
     given = _opt(args, "wallet")
     if given:
-        return str(given)
+        return name_wallet(str(given))
     here = wallet_of_cwd()
     if here is not None:
         return here
@@ -334,7 +340,7 @@ def cmd_report(args) -> int:
         history,
         period,
         label=wallet,
-        holder=args.holder if args.holder is not None else config.holder_name(wallet),
+        holder=config.holder_name(holder_of_wallet(wallet)),
         proofs_roots=roots,
         cli=cli,
         rates=rates,
@@ -374,20 +380,21 @@ def _write_statement(
 def cmd_holder(args) -> int:
     """The holder's ledger: every wallet of the holder, merged, from the first reception to the tip unless a period is given."""
     config = Config.load()
-    holders = config.holders
-    if not holders:
-        raise CLIError(
-            'no holder in bip322.toml: a [holders.KEY] table with name = "..." and wallets = ["NAME", ...] (bip322 init shows one)'
-        )
-    key = args.key
+    found = holders()
+    key = args.key or holder_of_cwd() or config.default_holder
     if key is None:
-        if len(holders) != 1:
-            raise CLIError(f"which holder? one of: {', '.join(holders)}")
-        key = next(iter(holders))
-    elif key not in holders:
-        raise CLIError(f"no [holders.{key}] in bip322.toml (holders: {', '.join(holders)})")
-    name, members = holders[key]["name"], holders[key]["wallets"]
-    slug = key
+        if len(found) != 1:
+            raise CLIError(
+                "which holder? bip322 report holder KEY" + (f" (holders here: {', '.join(found)})" if found else ": none in the tree yet")
+            )
+        key = found[0]
+    members = sorted(w for w, path in wallet_dirs().items() if path.parent.name == key) if key in found else []
+    if not members:
+        raise CLIError(
+            f"no wallet under {holder_dir(key)} yet: the first snapshot of a wallet under it makes it"
+            + (f" (holders here: {', '.join(found)})" if found else "")
+        )
+    name, slug = config.holder_name(key), key
     period_label = _period_label(args) if _period_given(args) else None
     dust = _dust(args, config, None)
     rates = _rates(args)
@@ -407,7 +414,7 @@ def cmd_holder(args) -> int:
     history = merge_histories(histories)
     cli = _cli(args, config, members[0])  # any one node for the chain-level work: re-verifying the proofs, the UTXO lookups
     period = _period(args, cli, history, period_label) if period_label else _whole_life(cli, history)
-    directory = Path(args.output) if args.output else holder_dir(slug) / period.label
+    directory = Path(args.output) if args.output else holder_statements_dir(key) / period.label
     _check_directory(directory, args.force)
     report = build_report(
         history,
@@ -488,7 +495,7 @@ def build_parser() -> argparse.ArgumentParser:
             "The statement of a period: holdings and movements in which every coin is backed by a verified BIP-322 proof of "
             f"control, from the owner's node wallet ({SPEC}). With no command the statement is made: "
             "bip322-report [--cli CMD] [-w NAME] (--year Y | --from WHEN --to WHEN | --from-height H --to-height H) [options]. "
-            "It goes to <wallet>/statements/<label>/ in the data directory and its proofs come from <wallet>/snapshots/ there: "
+            "It goes to <holder>/<wallet>/statements/<label>/ in the data directory and its proofs come from <holder>/<wallet>/snapshots/ there: "
             "the directory bip322 init made at or above the current one (--dir or BIP322_DIR name another), whose bip322.toml "
             "holds the defaults."
         ),
@@ -505,9 +512,9 @@ def build_parser() -> argparse.ArgumentParser:
         "-w",
         default=None,
         metavar="NAME",
-        help="the wallet: its directory NAME in the data directory, and the node wallet of that name (or the one its [wallets.NAME] "
-        "table names as node). Default: the wallet directory the command runs in, else wallet in bip322.toml, else the node's one "
-        "loaded wallet. May also follow the command.",
+        help="the wallet: its directory NAME in the data directory, under whichever holder it is (KEY/NAME: the holder a new one goes "
+        "under), and the node wallet of that name (or the one its [wallets.NAME] table names as node). Default: the wallet directory "
+        "the command runs in, else wallet in bip322.toml, else the node's one loaded wallet. May also follow the command.",
     )
     parser.add_argument(
         "--dir",
@@ -563,7 +570,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Opening and closing balances, every movement between them, a reconciliation, and for each closing output the BIP-322 proof of "
             "control, from the wallet's snapshots, that lists it, re-verified against the node now. The period is a calendar year, two instants, or two "
             "heights; opening figures are as of the start block, closing figures as of the end block. "
-            "The files go to <wallet>/statements/<label>/ in the data directory, named <wallet>-<label>.pdf (.html where WeasyPrint is not "
+            "The files go to <holder>/<wallet>/statements/<label>/ in the data directory, named <wallet>-<label>.pdf (.html where WeasyPrint is not "
             "installed, or with --html), .json, .csv, and a copy of each proofs file the statement cites, under its own name. "
             "Exit status: 0 when the result is OK, 1 when it is ATTENTION, 2 on an error."
         ),
@@ -575,9 +582,6 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="DIR",
         action="append",
         help="take the proofs from here instead of the wallet's snapshots/: a directory of snapshots, one snapshot, or one proofs file; may repeat",
-    )
-    p.add_argument(
-        "--holder", metavar="NAME", help="the holder of the wallet, as named in the statement's header (default: holder in bip322.toml)"
     )
     p.add_argument("--history", metavar="FILE", help="use this history.json instead of reading the node wallet")
     _add_statement_args(p, "under the wallet's statements/")
@@ -594,22 +598,26 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "holder",
         help="the holder's ledger over all its wallets, from the first reception to now unless a period is given: "
-        "<holder>-<label>.pdf (or .html), .json, .csv and the proofs files it cites, under holders/<holder>/<label>/",
+        "<holder>-<label>.pdf (or .html), .json, .csv and the proofs files it cites, under <holder>/statements/<label>/",
         description=(
             "One statement for a holder with several wallets: their histories merged, a transfer between two of them one movement "
-            "(kind transfer, its fee the only cost), every coin with its wallet, the balance the holder's total. A holder is a "
-            "[holders.KEY] table in bip322.toml: name (the statements' header) and wallets (the wallet directories that are the holder's); "
-            "KEY names it here, and may be left out when there is one. Without a period the ledger runs from the block before the first "
-            "transaction to the tip, labelled by the tip's date. The files go to holders/KEY/<label>/ in the data directory, named "
-            "KEY-<label>; the CSV's wallet column shows both sides (Exchange -> treasury, treasury -> cold). Exit status as for report."
+            "(kind transfer, its fee the only cost), every coin with its wallet, the balance the holder's total. A holder is a directory "
+            "of the tree, KEY, and its wallets the wallet directories under it; [holders.KEY] in bip322.toml gives its name for the "
+            "header. KEY may be left out inside the holder's directory, with holder = KEY in bip322.toml, or when the tree has one holder. "
+            "Without a period the ledger runs from the block before the first transaction to the tip, labelled by the tip's date. The files "
+            "go to KEY/statements/<label>/ in the data directory, named KEY-<label>; the CSV's wallet column shows both sides "
+            "(Exchange -> treasury, treasury -> cold). Exit status as for report."
         ),
     )
     p.add_argument(
-        "key", metavar="HOLDER", nargs="?", help="the holder's KEY, [holders.KEY] in bip322.toml (default: the one holder there)"
+        "key",
+        metavar="HOLDER",
+        nargs="?",
+        help="the holder: its directory in the data directory (default: the current directory's holder, holder in bip322.toml, else the tree's one)",
     )
     _add_node_args(p)
     _add_period_args(p)
-    _add_statement_args(p, "under holders/HOLDER/")
+    _add_statement_args(p, "under HOLDER/statements/")
     p.set_defaults(
         func=cmd_holder,
         examples=["holder", "holder company --year 2026", "holder company --rates sek.csv --currency SEK -o source-of-funds"],

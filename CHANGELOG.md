@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.0 (2026-10-15)
+
+Needs bip322-audit 0.19: holders above wallets. A holder is a directory of
+the tree and its wallets are the directories under it, so the grouping is
+the path; `[holders.KEY]` in `bip322.toml` gives only the name. The wallet's
+statement goes to `<holder>/<wallet>/statements/<label>/`, the holder's ledger
+to `<holder>/statements/<label>/`. `bip322 report holder [KEY]`: KEY may be
+left off inside the holder's directory, with `holder = KEY` in `bip322.toml`,
+or when the tree has one holder. `-w KEY/NAME` names the holder a new wallet
+goes under. `report --holder NAME` is gone: the header is the holder's name
+from the tree and its table.
+
 ## 0.14.0 (2026-10-15)
 
 Needs bip322-audit 0.18: a holder is a `[holders.KEY]` table in
