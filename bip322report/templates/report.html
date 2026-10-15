@@ -128,6 +128,7 @@
   <div class="result">{% if not r.ok %}<span class="pill bad">ATTENTION</span>{% endif %}</div>
 </div>
 <p class="period">{% if r.holder %}{{ r.holder }} · {% endif %}<span class="when">{{ r.period.start.time_utc | utc }}</span> – <span class="when">{{ r.period.end.time_utc | utc }}</span>{% if r.chain != "main" %} · {{ r.chain }} chain{% endif %}</p>
+{% if r.wallets %}<p class="small muted">Wallets of the holder, with their closing balances: {% for w in r.wallets %}{{ w.name }} {{ w.closing_btc }}{% if not loop.last %} · {% endif %}{% endfor %}. A transfer between them is one movement, its fee the holder's only cost.</p>{% endif %}
 
 {% if not r.ok %}
 <h2 class="attention">Attention</h2>
@@ -164,19 +165,19 @@
 <h2><span class="n">1.</span> Movements in the period</h2>
 {% if r.transactions %}
 <table>
-  <colgroup><col class="w-date"><col><col class="w-kind"><col class="w-num"><col class="w-num"><col class="w-num">{% if r.fiat %}<col class="w-num">{% endif %}</colgroup>
-  <thead><tr><th>Date (UTC)</th><th>Transaction</th><th>Kind</th><th class="num">Amount</th><th class="num">Fee</th><th class="num">Balance</th>{% if r.fiat %}<th class="num">Amount {{ r.fiat.currency }}</th>{% endif %}</tr></thead>
+  <colgroup><col class="w-date"><col><col class="w-kind">{% if r.wallets %}<col>{% endif %}<col class="w-num"><col class="w-num"><col class="w-num">{% if r.fiat %}<col class="w-num">{% endif %}</colgroup>
+  <thead><tr><th>Date (UTC)</th><th>Transaction</th><th>Kind</th>{% if r.wallets %}<th>From → to</th>{% endif %}<th class="num">Amount</th><th class="num">Fee</th><th class="num">Balance</th>{% if r.fiat %}<th class="num">Amount {{ r.fiat.currency }}</th>{% endif %}</tr></thead>
   <tbody>
-  <tr class="open"><td colspan="5">Opening balance, {{ r.period.start.time_utc | utc }}</td><td class="num">{{ r.opening.total_btc }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
+  <tr class="open"><td colspan="{{ 6 if r.wallets else 5 }}">Opening balance, {{ r.period.start.time_utc | utc }}</td><td class="num">{{ r.opening.total_btc }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
   {% for t in r.transactions %}
   <tr><td>{{ t.time_utc[:10] }}<br><span class="muted">{{ t.time_utc[11:19] }}</span></td>
       <td>{{ tx(t.txid) }}</td>
-      <td>{{ "dust swept" if t.kind == "swept" else t.kind }}</td><td class="num">{% if t.amount_sat %}{{ t.amount_btc | acct }}{% endif %}</td><td class="num">{% if t.kind == "mixed" %}<span class="muted">unknown</span>{% elif t.fee_btc %}({{ t.fee_btc }}){% endif %}</td><td class="num">{{ t.balance_after_btc }}</td>
+      <td>{{ "dust swept" if t.kind == "swept" else t.kind }}</td>{% if r.wallets %}<td>{{ t.counterpart | replace("->", "→") }}</td>{% endif %}<td class="num">{% if t.amount_sat %}{{ t.amount_btc | acct }}{% endif %}</td><td class="num">{% if t.kind == "mixed" %}<span class="muted">unknown</span>{% elif t.fee_btc %}({{ t.fee_btc }}){% endif %}</td><td class="num">{{ t.balance_after_btc }}</td>
     {% if r.fiat %}<td class="num">{{ (t.fiat.amount | acct) if t.fiat.amount and t.amount_sat else "" }}</td>{% endif %}</tr>
   {% endfor %}
-  <tr class="total"><td colspan="3">Closing balance, {{ r.period.end.time_utc | utc }} · the holdings of section 2</td><td class="num">{{ r.totals.amount_btc | acct }}</td><td class="num">({{ r.totals.fees_btc }})</td><td class="num">{{ r.closing.total_btc }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
+  <tr class="total"><td colspan="{{ 4 if r.wallets else 3 }}">Closing balance, {{ r.period.end.time_utc | utc }} · the holdings of section 2</td><td class="num">{{ r.totals.amount_btc | acct }}</td><td class="num">({{ r.totals.fees_btc }})</td><td class="num">{{ r.closing.total_btc }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
   {% if not r.reconciliation.ok %}
-  <tr><td colspan="5" class="bad">Difference between the running balance and the holdings on the chain</td><td class="num bad">{{ r.reconciliation.diff_sat | btc | acct }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
+  <tr><td colspan="{{ 6 if r.wallets else 5 }}" class="bad">Difference between the running balance and the holdings on the chain</td><td class="num bad">{{ r.reconciliation.diff_sat | btc | acct }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
   {% endif %}
   </tbody>
 </table>
@@ -187,15 +188,15 @@
 <div class="keep">
 <h2><span class="n">2.</span> Holdings at the end of the period · {{ r.period.end.time_utc | utc }}</h2>
 <table>
-  <colgroup><col style="width:44%"><col><col class="w-btc"></colgroup>
-  <thead><tr><th>UTXO</th><th>Locked to (scriptPubKey)</th><th class="num">Amount</th></tr></thead>
+  <colgroup><col style="width:44%"><col>{% if r.wallets %}<col class="w-kind">{% endif %}<col class="w-btc"></colgroup>
+  <thead><tr><th>UTXO</th><th>Locked to (scriptPubKey)</th>{% if r.wallets %}<th>Wallet</th>{% endif %}<th class="num">Amount</th></tr></thead>
   <tbody>
   {% for a in r.closing.addresses %}{% for o in a.outputs %}
   <tr><td><span class="mono hl-utxo">{{ tx(o.txid, "hl-utxo") }}:{{ o.vout }}</span></td>
       <td>{{ spk(a.script.script_pubkey, o.txid, "hl-script") }}</td>
-      <td class="num hl-amount">{{ o.amount_btc }}</td></tr>
+      {% if r.wallets %}<td>{{ o.wallet }}</td>{% endif %}<td class="num hl-amount">{{ o.amount_btc }}</td></tr>
   {% endfor %}{% endfor %}
-  <tr class="total"><td colspan="2">Closing balance</td><td class="num">{{ r.closing.total_btc }}</td></tr>
+  <tr class="total"><td colspan="{{ 3 if r.wallets else 2 }}">Closing balance</td><td class="num">{{ r.closing.total_btc }}</td></tr>
   </tbody>
 </table>
 {% if r.closing.coins %}<p class="small muted">One page per UTXO follows: the proof of control of its scriptPubKey, then the chain's record of the UTXO at the block of the proof.</p>{% elif r.dust.count %}<p class="small muted">Nothing but dust at the end of the period (see the notes): nothing to prove.</p>{% else %}<p class="small muted">No holdings at the end of the period: nothing to prove.</p>{% endif %}

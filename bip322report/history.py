@@ -29,13 +29,14 @@ class Coin:
     address: str | None  # None for an output of somebody else's that has no address (a bare script, OP_RETURN with a value)
     amount_sat: int
     height: int | None = None  # the block that created it
+    wallet: str | None = None  # which of a holder's wallets it belongs to, in a merged history (holder.merge_histories)
 
     @property
     def outpoint(self) -> Outpoint:
         return (self.txid, self.vout)
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "txid": self.txid,
             "vout": self.vout,
             "address": self.address,
@@ -43,10 +44,13 @@ class Coin:
             "amount_btc": btc(self.amount_sat),
             "height": self.height,
         }
+        if self.wallet is not None:
+            d["wallet"] = self.wallet
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> Coin:
-        return cls(d["txid"], int(d["vout"]), d.get("address"), int(d["amount_sat"]), d.get("height"))
+        return cls(d["txid"], int(d["vout"]), d.get("address"), int(d["amount_sat"]), d.get("height"), d.get("wallet"))
 
 
 @dataclass
@@ -79,7 +83,8 @@ class WalletTx:
 
     @property
     def kind(self) -> str:
-        """receive (nothing of ours spent), mixed (others' inputs beside ours), internal (everything came back), send; swept for dust booked late."""
+        """receive (nothing of ours spent), mixed (others' inputs beside ours), internal (everything came back), send; swept for dust
+        booked late; in a holder's merged history, transfer when everything came back but more than one wallet was involved."""
         if self.swept:
             return "swept"
         if not self.ours_in:
@@ -87,7 +92,8 @@ class WalletTx:
         if self.mixed:
             return "mixed"
         if not self.others_out:
-            return "internal"
+            wallets = {c.wallet for c in self.ours_in} | {c.wallet for c in self.ours_out}
+            return "transfer" if len(wallets) > 1 else "internal"
         return "send"
 
     @property
@@ -243,7 +249,7 @@ class History:
             int(d["tip_height"]),
             d["tip_hash"],
             d.get("fetched_utc", ""),
-            _chain_order([WalletTx.from_dict(t) for t in d.get("transactions", [])]),
+            chain_order([WalletTx.from_dict(t) for t in d.get("transactions", [])]),
             [WalletTx.from_dict(t) for t in d.get("pending", [])],
         )
 
@@ -330,7 +336,7 @@ def fetch_history(cli: BitcoinCli, *, progress=None) -> History:
             payers=_payers(cli, tx, known) if height is not None and len(ours_in) < len(vin) else [],
         )
         (txs if height is not None else pending).append(entry)
-    return History(chain, wallet_name, tip_height, tip_hash, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), _chain_order(txs), pending)
+    return History(chain, wallet_name, tip_height, tip_hash, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), chain_order(txs), pending)
 
 
 def _payers(cli: BitcoinCli, tx: dict, known: dict[Outpoint, Coin]) -> list[str]:
@@ -375,7 +381,7 @@ def _given_up(cli: BitcoinCli, tx: dict) -> bool:
     return False
 
 
-def _chain_order(txs: list[WalletTx]) -> list[WalletTx]:
+def chain_order(txs: list[WalletTx]) -> list[WalletTx]:
     """Confirmed transactions in the chain's order: by block, and within a block by position.
 
     Where a position is missing (a history saved before it was recorded) the

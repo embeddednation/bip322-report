@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.13.0 (2026-10-15)
+
+Needs bip322-audit 0.17.
+
+- `bip322 report holder`: one ledger for a holder with several wallets. The
+  holder is `holder` in `bip322.toml` (or `--holder NAME`) and its wallets
+  are the wallet directories whose holder it is, so nothing is listed twice.
+  Their histories merge by transaction: a move between two of the holder's
+  wallets is one movement of kind `transfer`, its fee exact, every coin
+  knows its wallet, and the balance is the holder's total (each wallet's
+  under `wallets` in the JSON). Without a period the ledger runs from the
+  first transaction to the tip, labelled by the tip's date. It goes to
+  `holders/<holder>/<label>/`, named `<holder>-<label>`; the CSV's wallet
+  column shows both sides (`Exchange -> treasury`, `treasury -> cold`), and
+  the statement adds a from/to column and the wallet of each coin held.
+- `history.chain_order` is public; a `Coin` carries `wallet` in a merged
+  history; the JSON always has a `wallets` key (null for one wallet).
+
 ## 0.12.0 (2026-10-15)
 
 Needs bip322-audit 0.16.

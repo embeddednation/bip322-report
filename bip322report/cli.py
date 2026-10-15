@@ -16,7 +16,17 @@ import sys
 from pathlib import Path
 
 from bip322audit.audit import AuditError
-from bip322audit.datadir import Config, ConfigError, snapshots_dir, statements_dir, use_data_dir, wallet_of_cwd
+from bip322audit.datadir import (
+    Config,
+    ConfigError,
+    data_dir,
+    holder_dir,
+    snapshots_dir,
+    statements_dir,
+    use_data_dir,
+    wallet_of_cwd,
+    wallets,
+)
 from bip322audit.proofs import find_proofs
 from bip322audit.rpc import BitcoinCli, RpcError, btc
 from bip322core._version import SPEC
@@ -27,6 +37,7 @@ from . import TOOL
 from .coverage import pending_snapshots, proofs_names
 from .fiat import Rates
 from .history import History, fetch_history
+from .holder import holder_slug, merge_histories
 from .period import Period, block, last_block_before, parse_when, period_between, period_for_heights, period_for_year
 from .render import HEADINGS, PACKAGE_FONTS, THEMES, render_html, write_csv, write_pdf
 from .report import build_report, format_summary
@@ -94,6 +105,28 @@ def _check_history(cli: BitcoinCli, history: History, source: str) -> None:
             f"{source}: its tip block {history.tip_height} ({history.tip_hash}) is not in the node's chain "
             "(a reorganisation, a node that is behind, or another network); read the history again"
         )
+
+
+def _theme(args, config: Config, wallet: str | None) -> str:
+    theme = str(_setting(args, config, "theme", "theme", wallet, DEFAULT_THEME))
+    if theme not in THEMES:
+        raise CLIError(f"theme {theme!r} is not one of {', '.join(THEMES)}")
+    return theme
+
+
+def _engines(args) -> list[str] | None:
+    return args.engines.split(",") if args.engines else None
+
+
+def _period_given(args) -> bool:
+    return any(getattr(args, k) is not None for k in ("year", "from_when", "to_when", "from_height", "to_height"))
+
+
+def _whole_life(cli: BitcoinCli, history: History) -> Period:
+    """From the block before the first transaction to the history's tip, labelled by the tip's date: the ledger to date."""
+    first = min((tx.height for tx in history.txs if tx.height is not None), default=history.tip_height)
+    end = block(cli, history.tip_height)
+    return Period(end.iso_time[:10], block(cli, max(first - 1, 0)), end, None, None, True)
 
 
 def _period_label(args) -> str:
@@ -288,9 +321,7 @@ def cmd_report(args) -> int:
     wallet = _wallet_name(args, config)
     dust = _dust(args, config, wallet)
     rates = _rates(args)
-    theme = str(_setting(args, config, "theme", "theme", wallet, DEFAULT_THEME))
-    if theme not in THEMES:
-        raise CLIError(f"theme {theme!r} is not one of {', '.join(THEMES)}")
+    theme = _theme(args, config, wallet)
     pdf = not args.html and _pdf_possible()
     roots = _proofs_roots(args, wallet) if args.snapshots else None  # a given path is checked before any work
     if args.output:
@@ -309,12 +340,18 @@ def cmd_report(args) -> int:
         proofs_roots=roots,
         cli=cli,
         rates=rates,
-        engines=args.engines.split(",") if args.engines else None,
+        engines=_engines(args),
         progress=_progress,
         dust_sat=dust,
         addresses=config.addresses,
     )
-    stem = _file_stem(wallet, period_label)
+    return _write_statement(args, config, wallet, report, directory, _file_stem(wallet, period_label), roots, history.chain, theme, pdf)
+
+
+def _write_statement(
+    args, config: Config, wallet: str | None, report: dict, directory: Path, stem: str, roots, chain: str, theme: str, pdf: bool
+) -> int:
+    """The JSON, the CSV, the proofs files cited and the PDF (or HTML) into the directory, the summary on stderr, the directory on stdout."""
     report["name"] = stem
     directory.mkdir(parents=True, exist_ok=True)
     (directory / f"{stem}.json").write_text(json.dumps(report, indent=2, default=str) + "\n")
@@ -324,7 +361,7 @@ def cmd_report(args) -> int:
     print(format_summary(report), file=sys.stderr)
     explorer = _setting(args, config, "explorer", "explorer", wallet)
     if explorer is None:
-        explorer = EXPLORER if history.chain == "main" else None
+        explorer = EXPLORER if chain == "main" else None
     heading = _setting(args, config, "heading", "heading", wallet)
     if pdf:  # last: should the rendering fail, everything else is in place
         write_pdf(render_html(report, explorer=explorer, theme=theme, heading=heading, fonts_url=PACKAGE_FONTS), directory / f"{stem}.pdf")
@@ -336,9 +373,108 @@ def cmd_report(args) -> int:
     return 0 if report["ok"] else 1
 
 
+def cmd_holder(args) -> int:
+    """The holder's ledger: every wallet of the holder, merged, from the first reception to the tip unless a period is given."""
+    config = Config.load()
+    name = args.holder or config.get("holder")
+    if name is None:
+        raise CLIError("name the holder: holder = NAME in bip322.toml, or --holder NAME")
+    name = str(name)
+    members = [w for w in wallets() if config.get("holder", w) in (None, name)]
+    if not members:
+        raise CLIError(f"no wallet directory in {data_dir()} belongs to {name!r} (holder in bip322.toml, per wallet or at the top)")
+    slug = holder_slug(name)
+    period_label = _period_label(args) if _period_given(args) else None
+    dust = _dust(args, config, None)
+    rates = _rates(args)
+    theme = _theme(args, config, None)
+    pdf = not args.html and _pdf_possible()
+    roots = [snapshots_dir(w) for w in members if snapshots_dir(w).is_dir()]
+    proofs_names([path for path, _ in find_proofs(roots)])  # refuses two files under one name before any work
+    if args.output:
+        _check_directory(Path(args.output), args.force)
+
+    histories: dict[str, History] = {}
+    for w in members:
+        cli = _cli(args, config, w)
+        _progress(f"{w}: reading the history")
+        histories[w] = fetch_history(cli, progress=_progress)
+        _check_history(cli, histories[w], f"{w}'s history")
+    history = merge_histories(histories)
+    cli = _cli(args, config, members[0])  # any one node for the chain-level work: re-verifying the proofs, the UTXO lookups
+    period = _period(args, cli, history, period_label) if period_label else _whole_life(cli, history)
+    directory = Path(args.output) if args.output else holder_dir(slug) / period.label
+    _check_directory(directory, args.force)
+    report = build_report(
+        history,
+        period,
+        label=name,
+        proofs_roots=roots,
+        cli=cli,
+        rates=rates,
+        engines=_engines(args),
+        progress=_progress,
+        dust_sat=dust,
+        addresses=config.addresses,
+        wallets=members,
+        node_check=False,
+    )
+    return _write_statement(args, config, None, report, directory, f"{slug}-{period.label}", roots, history.chain, theme, pdf)
+
+
 # --------------------------------------------------------------------------- #
 # parser
 # --------------------------------------------------------------------------- #
+
+
+def _add_period_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--year", "-y", type=int, metavar="YEAR", help="the calendar year, UTC")
+    p.add_argument("--from", dest="from_when", metavar="WHEN", help="start instant (YYYY-MM-DD or ISO 8601, UTC); with --to")
+    p.add_argument("--to", dest="to_when", metavar="WHEN", help="end instant, exclusive; in the future means up to the tip")
+    p.add_argument("--from-height", type=int, metavar="H", help="opening block height; with --to-height")
+    p.add_argument("--to-height", type=int, metavar="H", help="closing block height")
+
+
+def _add_statement_args(p: argparse.ArgumentParser, where: str) -> None:
+    """What every statement takes: dust, fiat, looks, output."""
+    p.add_argument(
+        "--dust",
+        metavar="SATS",
+        type=int,
+        default=None,
+        help=(
+            "outputs of at most SATS satoshi received from others, in a transaction that spends nothing of the wallet's, "
+            "and not spent by the closing block are dust: "
+            "left out of every figure, and listed in the JSON; the wallet's own change and consolidations never are "
+            "(default: dust in bip322.toml, else none)"
+        ),
+    )
+    p.add_argument("--dust-force", action="store_true", help=f"accept a --dust above {DUST_MAX} satoshi")
+    p.add_argument("--rates", metavar="CSV", help="date,rate rows (rate per BTC) for a fiat valuation of the movements")
+    p.add_argument("--rate", metavar="RATE", help="a constant rate per BTC instead of --rates")
+    p.add_argument("--currency", metavar="CODE", help="the fiat currency's name for --rates/--rate (default FIAT)")
+    p.add_argument(
+        "--explorer",
+        default=None,
+        metavar="URL",
+        help=f"block explorer for links in the statement; '' for no links (default: explorer in bip322.toml, else {EXPLORER} on mainnet, none on other chains)",
+    )
+    p.add_argument("--html", action="store_true", help="write the statement as one HTML file instead of the PDF")
+    p.add_argument(
+        "--theme",
+        choices=tuple(THEMES),
+        default=None,
+        help=f"page colours: a warm canvas with serif text (journal), Solarized light, white paper or Solarized dark (default: theme in bip322.toml, else {DEFAULT_THEME})",
+    )
+    p.add_argument(
+        "--heading",
+        choices=HEADINGS,
+        help="section headings: coloured text over a rule (underline), a red tab over a grey rule (tab), the number in red (number), a thin red rule (redrule); default per theme",
+    )
+    p.add_argument("--no-proofs", action="store_true", help="do not copy the proofs files the statement cites next to it")
+    p.add_argument("--engines", default=None, help="comma separated bip322 engines for re-verifying the proofs (default: all installed)")
+    p.add_argument("--output", "-o", metavar="DIR", help=f"write the statement here instead of {where}")
+    p.add_argument("--force", action="store_true", help="write into a non-empty directory")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -429,11 +565,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_node_args(p)
-    p.add_argument("--year", "-y", type=int, metavar="YEAR", help="the calendar year, UTC")
-    p.add_argument("--from", dest="from_when", metavar="WHEN", help="start instant (YYYY-MM-DD or ISO 8601, UTC); with --to")
-    p.add_argument("--to", dest="to_when", metavar="WHEN", help="end instant, exclusive; in the future means up to the tip")
-    p.add_argument("--from-height", type=int, metavar="H", help="opening block height; with --to-height")
-    p.add_argument("--to-height", type=int, metavar="H", help="closing block height")
+    _add_period_args(p)
     p.add_argument(
         "--snapshots",
         metavar="DIR",
@@ -443,45 +575,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--holder", metavar="NAME", help="the holder of the wallet, as named in the statement's header (default: holder in bip322.toml)"
     )
-    p.add_argument(
-        "--dust",
-        metavar="SATS",
-        type=int,
-        default=None,
-        help=(
-            "outputs of at most SATS satoshi received from others, in a transaction that spends nothing of the wallet's, "
-            "and not spent by the closing block are dust: "
-            "left out of every figure, and listed in the JSON; the wallet's own change and consolidations never are "
-            "(default: dust in bip322.toml, else none)"
-        ),
-    )
-    p.add_argument("--dust-force", action="store_true", help=f"accept a --dust above {DUST_MAX} satoshi")
     p.add_argument("--history", metavar="FILE", help="use this history.json instead of reading the node wallet")
-    p.add_argument("--rates", metavar="CSV", help="date,rate rows (rate per BTC) for a fiat valuation of the movements")
-    p.add_argument("--rate", metavar="RATE", help="a constant rate per BTC instead of --rates")
-    p.add_argument("--currency", metavar="CODE", help="the fiat currency's name for --rates/--rate (default FIAT)")
-    p.add_argument(
-        "--explorer",
-        default=None,
-        metavar="URL",
-        help=f"block explorer for links in the statement; '' for no links (default: explorer in bip322.toml, else {EXPLORER} on mainnet, none on other chains)",
-    )
-    p.add_argument("--html", action="store_true", help="write the statement as one HTML file instead of the PDF")
-    p.add_argument(
-        "--theme",
-        choices=tuple(THEMES),
-        default=None,
-        help=f"page colours: a warm canvas with serif text (journal), Solarized light, white paper or Solarized dark (default: theme in bip322.toml, else {DEFAULT_THEME})",
-    )
-    p.add_argument(
-        "--heading",
-        choices=HEADINGS,
-        help="section headings: coloured text over a rule (underline), a red tab over a grey rule (tab), the number in red (number), a thin red rule (redrule); default per theme",
-    )
-    p.add_argument("--no-proofs", action="store_true", help="do not copy the proofs files the statement cites next to it")
-    p.add_argument("--engines", default=None, help="comma separated bip322 engines for re-verifying the proofs (default: all installed)")
-    p.add_argument("--output", "-o", metavar="DIR", help="write the statement here instead of under the wallet's statements/")
-    p.add_argument("--force", action="store_true", help="write into a non-empty directory")
+    _add_statement_args(p, "under the wallet's statements/")
     p.set_defaults(
         func=cmd_report,
         examples=[
@@ -492,10 +587,32 @@ def build_parser() -> argparse.ArgumentParser:
         ],
     )
 
+    p = sub.add_parser(
+        "holder",
+        help="the holder's ledger over all its wallets, from the first reception to now unless a period is given: "
+        "<holder>-<label>.pdf (or .html), .json, .csv and the proofs files it cites, under holders/<holder>/<label>/",
+        description=(
+            "One statement for a holder with several wallets: their histories merged, a transfer between two of them one movement "
+            "(kind transfer, its fee the only cost), every coin with its wallet, the balance the holder's total. The holder is --holder NAME, "
+            "else holder in bip322.toml; its wallets are the wallet directories whose holder (their [wallets.NAME] table, else the top "
+            "level) it is. Without a period the ledger runs from the block before the first transaction to the tip, labelled by the tip's "
+            "date. The files go to holders/<holder>/<label>/ in the data directory, the holder's name as a slug (company-ab); the CSV's "
+            "wallet column shows both sides (Exchange -> treasury, treasury -> cold). Exit status as for report."
+        ),
+    )
+    _add_node_args(p)
+    p.add_argument("--holder", metavar="NAME", help="the holder (default: holder in bip322.toml)")
+    _add_period_args(p)
+    _add_statement_args(p, "under holders/<holder>/")
+    p.set_defaults(
+        func=cmd_holder,
+        examples=["holder", "holder --year 2026", "holder --holder 'Company AB' --rates sek.csv --currency SEK -o source-of-funds"],
+    )
+
     p = sub.add_parser("handbook", help="print the handbook: the yearly flow end to end, for the holder and for the auditor")
     p.set_defaults(func=cmd_handbook)
 
-    add_help_command("bip322-report", sub, {"Workflow": ["history", "block", "balance", "report", "handbook", "help"]})
+    add_help_command("bip322-report", sub, {"Workflow": ["history", "block", "balance", "report", "holder", "handbook", "help"]})
     return parser
 
 
@@ -505,7 +622,7 @@ def cmd_handbook(args) -> int:
     return 0
 
 
-COMMANDS = ("history", "block", "balance", "report", "handbook", "help")
+COMMANDS = ("history", "block", "balance", "report", "holder", "handbook", "help")
 _GLOBAL_WITH_VALUE = ("--cli", "--wallet", "-w", "--dir")
 
 

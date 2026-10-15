@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shlex
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -40,11 +41,18 @@ def build_report(
     onchain: bool = True,
     dust_sat: int = 0,
     addresses: dict[str, str] | None = None,
+    wallets: Sequence[str] | None = None,
+    node_check: bool = True,
 ) -> dict:
     """The report as a plain dict (what report.json holds and the templates render).
 
     ``addresses`` is ``[addresses]`` of ``bip322.toml``: the wallet each address of
     someone else belongs to, which names the other side of a movement (``counterpart``).
+    ``wallets`` names a holder's wallets when ``history`` is their merged one
+    (``holder.merge_histories``): the counterpart then shows both sides, and
+    the report carries each wallet's opening and closing balance under
+    ``wallets``.  ``node_check`` False leaves out the listunspent cross-check,
+    which is per node wallet.
 
     ``cli`` is needed to re-verify the proofs files under ``proofs_roots`` against the chain and to
     cross-check the closing balance with ``listunspent`` when the period runs
@@ -76,7 +84,7 @@ def build_report(
     _verify_addresses(closing_addresses, engines)
     scripts = {a["address"]: a["script"]["script_pubkey"] for a in closing_addresses}
     onchain_result = _onchain(cli, closing_rows, period, scripts, progress) if cli is not None and onchain and closing_rows else None
-    tx_rows, totals = _movement_rows(movements, opening_sat, rates, addresses or {}, label)
+    tx_rows, totals = _movement_rows(movements, opening_sat, rates, addresses or {}, label, holder=wallets is not None)
     net_sat = totals["net_sat"]
 
     report = {
@@ -124,8 +132,9 @@ def build_report(
         "pending_transactions": [tx.to_dict() for tx in history.pending],
         "onchain": onchain_result,
         "fiat": rates.to_dict() if rates else None,
-        "node_check": _node_check(cli, history, period, closing, dust) if cli is not None else None,
+        "node_check": _node_check(cli, history, period, closing, dust) if cli is not None and node_check else None,
     }
+    report["wallets"] = [_wallet_balances(w, opening, closing) for w in wallets] if wallets is not None else None
     report["report_id"] = _report_id(report)
     report["ok"] = _verdict(report)
     return report
@@ -188,9 +197,44 @@ def _fiat(rates: Rates, tx: WalletTx, amount: int) -> dict:
     }
 
 
-def _counterpart(tx: WalletTx, names: dict[str, str], own: str) -> str:
+def _wallet_balances(wallet: str, opening: list[Coin], closing: list[Coin]) -> dict:
+    o = sum(c.amount_sat for c in opening if c.wallet == wallet)
+    s = sum(c.amount_sat for c in closing if c.wallet == wallet)
+    return {"name": wallet, "opening_sat": o, "opening_btc": btc(o), "closing_sat": s, "closing_btc": btc(s)}
+
+
+def _named(names: dict[str, str], addresses) -> list[str]:
+    """The wallets ``[addresses]`` names for these addresses, each once, in order."""
+    found: list[str] = []
+    for address in addresses:
+        name = names.get(address)
+        if name is not None and name not in found:
+            found.append(name)
+    return found
+
+
+def _ends(tx: WalletTx, names: dict[str, str]) -> str:
+    """Both sides of a holder's movement, ``from -> to``: "Exchange -> treasury", "treasury -> cold", "cold -> Exchange";
+    an unnamed side stays empty, and a move within one wallet is that wallet."""
+    wallets_in = sorted({c.wallet for c in tx.ours_in if c.wallet})
+    wallets_out = sorted({c.wallet for c in tx.ours_out if c.wallet})
+    if tx.kind in ("receive", "swept"):
+        return f"{', '.join(_named(names, tx.payers))} -> {', '.join(wallets_out)}"
+    if tx.kind in ("send", "mixed"):
+        return f"{', '.join(wallets_in)} -> {', '.join(_named(names, (c.address for c in tx.others_out if c.address)))}"
+    if tx.kind == "transfer":
+        source = [w for w in wallets_in if w not in wallets_out] or wallets_in
+        target = [w for w in wallets_out if w not in wallets_in] or wallets_out
+        return f"{', '.join(source)} -> {', '.join(target)}"
+    return ", ".join(wallets_in or wallets_out)
+
+
+def _counterpart(tx: WalletTx, names: dict[str, str], own: str, holder: bool = False) -> str:
     """The wallet on the other side: the wallet itself for an internal move, else the names ``[addresses]`` gives the
-    addresses there (paid by a send, paying a receive; both for a mixed one), "" when it names none."""
+    addresses there (paid by a send, paying a receive; both for a mixed one), "" when it names none.  For a holder's
+    ledger (``holder``), both sides (:func:`_ends`)."""
+    if holder:
+        return _ends(tx, names)
     if tx.kind == "internal":
         return own
     theirs = [c.address for c in tx.others_out if c.address] if tx.kind in ("send", "mixed") else []
@@ -204,7 +248,7 @@ def _counterpart(tx: WalletTx, names: dict[str, str], own: str) -> str:
 
 
 def _movement_rows(
-    movements: list[WalletTx], opening_sat: int, rates: Rates | None, names: dict[str, str], own: str
+    movements: list[WalletTx], opening_sat: int, rates: Rates | None, names: dict[str, str], own: str, holder: bool = False
 ) -> tuple[list[dict], dict]:
     """The period's transactions as rows with a running balance and the other side named, and the totals of the period."""
     rows = []
@@ -215,7 +259,7 @@ def _movement_rows(
         running += tx.net_sat
         row["balance_after_sat"] = running
         row["balance_after_btc"] = btc(running)
-        row["counterpart"] = _counterpart(tx, names, own)
+        row["counterpart"] = _counterpart(tx, names, own, holder)
         # what moved between the wallet and others, before the fee: received, or (sent).  A mixed transaction's fee is
         # unknown (others funded it too), so its amount is the wallet's net and no fee is stated for it.
         amount = tx.net_sat + (tx.fee_sat or 0)
@@ -647,6 +691,8 @@ def format_summary(report: dict) -> str:
         f"stamped after the period's end: {c['covered_after_period_count']}/{c['total_count']}"
         + ("" if c["complete"] else f"; UNCOVERED {c['uncovered_btc']} BTC"),
     ]
+    if report.get("wallets"):
+        lines.append("wallets: " + ", ".join(f"{w['name']} {w['closing_btc']} BTC" for w in report["wallets"]))
     d = report.get("dust") or {}
     if d.get("count"):
         lines.append(f"dust: {d['count']} outputs of at most {d['threshold_sat']} sat, {d['total_btc']} BTC, left out of every figure")

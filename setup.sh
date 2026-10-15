@@ -16,7 +16,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 PY=${PYTHON:-python3}
 CORE_REF=${CORE_REF:-v0.12.0}
-AUDIT_REF=${AUDIT_REF:-v0.16.0}
+AUDIT_REF=${AUDIT_REF:-v0.17.0}
 CORE_URL=${CORE_URL:-git+https://github.com/embeddednation/bip322-core.git}
 AUDIT_URL=${AUDIT_URL:-git+https://github.com/embeddednation/bip322-audit.git}
 CORE_PATH=""
