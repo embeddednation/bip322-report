@@ -336,24 +336,27 @@ def _font_url(file: str, fonts_url: str | None) -> str:
 def write_csv(report: dict, path: Path) -> None:
     """The movements for a spreadsheet: time, txid, category, amount (the wallet's net, fee inside), balance (the running sum of
     the amounts) and wallet (the other side, as ``[addresses]`` in bip322.toml names it; empty to fill in by hand), then rate and
-    amount_fiat when rates were given."""
+    amount_fiat when rates were given.  A holder's ledger is one block per wallet, the wallet's name on a line of its own above
+    the header, the movements as that wallet sees them, a blank line between."""
     fiat = report.get("fiat")
     fields = ["time", "txid", "category", "amount", "balance", "wallet"] + (["rate", "amount_fiat"] if fiat else [])
+
+    def row(tx: dict) -> list:
+        cells = [tx["time_utc"], tx["txid"], tx["kind"], tx["net_btc"], tx["balance_after_btc"], tx["counterpart"]]
+        return cells + ([tx["fiat"]["rate"], tx["fiat"]["net"]] if fiat else [])
+
     with Path(path).open("w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=fields)
-        w.writeheader()
-        for tx in report["transactions"]:
-            row = {
-                "time": tx["time_utc"],
-                "txid": tx["txid"],
-                "category": tx["kind"],
-                "amount": tx["net_btc"],
-                "balance": tx["balance_after_btc"],
-                "wallet": tx["counterpart"],
-            }
-            if fiat:
-                row.update({"rate": tx["fiat"]["rate"], "amount_fiat": tx["fiat"]["net"]})
-            w.writerow(row)
+        w = csv.writer(fh)
+        if report.get("wallets") is None:
+            w.writerow(fields)
+            w.writerows(row(tx) for tx in report["transactions"])
+            return
+        for n, block in enumerate(report["wallets"]):
+            if n:
+                w.writerow([])
+            w.writerow([block["name"]])
+            w.writerow(fields)
+            w.writerows(row(tx) for tx in block["transactions"])
 
 
 def write_pdf(html: str, path: Path) -> None:

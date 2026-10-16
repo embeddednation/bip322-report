@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.0 (2026-10-16)
+
+The holder's CSV is one block per wallet: the wallet's name on a line of its
+own, the six-column header, then the movements as that wallet sees them, the
+amount its net (fee inside), the balance its own running sum, the wallet
+column the other side plain: another wallet of the holder's, or what
+`[addresses]` names. A move between two of the holder's wallets is a
+`transfer` in both blocks. The JSON carries the same rows under each entry
+of `wallets` (`transactions`). The statement's merged table is as before.
+
 ## 0.16.0 (2026-10-16)
 
 Needs bip322-audit 0.20: settings per holder. A key in a `[holders.KEY]`

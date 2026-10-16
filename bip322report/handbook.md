@@ -131,8 +131,11 @@ cost, and the balance is the holder's total, each wallet's beside it in the
 JSON and the statement. Without a period the ledger runs from the block
 before the first transaction to the tip and is labelled by the tip's date;
 `--year` and the other period options work as for a wallet's statement. The
-CSV has the same six columns, and its `wallet` column shows both sides:
-`Exchange -> treasury`, `treasury -> cold`, `cold -> Exchange`. The proofs
+CSV has the same six columns in one block per wallet, the wallet's name on a
+line of its own above the header: the movements as that wallet sees them, the
+amount its net, the balance its own, the `wallet` column the other side, another
+wallet of the holder's (`cold`) or what `[addresses]` names (`Exchange`); a move
+between two of the holder's wallets is a `transfer` in both blocks. The proofs
 come from every wallet's `snapshots/`, so each coin held is also one the
 holder has proven control of.
 

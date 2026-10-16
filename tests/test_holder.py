@@ -39,6 +39,15 @@ def _two_wallets(wallet) -> tuple[dict[str, FakeNode], list[str]]:
     return {"treasury": treasury, "cold": cold}, [a0, a1, c0, c1]
 
 
+def csv_blocks(path: Path) -> dict[str, list[dict]]:
+    """A holder's CSV: the wallet named above each block, its rows as dicts."""
+    blocks = {}
+    for block in path.read_text().strip().split("\n\n"):
+        name, *rows = block.splitlines()
+        blocks[name] = list(csv.DictReader(rows))
+    return blocks
+
+
 def test_merged_histories_make_one_ledger(wallet, tmp_path):
     nodes, (a0, a1, c0, c1) = _two_wallets(wallet)
     histories = {name: fetch_history(node) for name, node in nodes.items()}
@@ -66,20 +75,41 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
         "cold -> Exchange",
         "cold -> treasury",
     ]
-    assert report["wallets"] == [
-        {"name": "cold", "opening_sat": 0, "opening_btc": "0.00000000", "closing_sat": 0, "closing_btc": "0.00000000"},
-        {"name": "treasury", "opening_sat": 0, "opening_btc": "0.00000000", "closing_sat": 78_000, "closing_btc": "0.00078000"},
+    cold, treasury = report["wallets"]
+    assert (cold["name"], cold["opening_sat"], cold["closing_sat"]) == ("cold", 0, 0)
+    assert (treasury["name"], treasury["opening_sat"], treasury["closing_sat"], treasury["closing_btc"]) == (
+        "treasury",
+        0,
+        78_000,
+        "0.00078000",
+    )
+    # each wallet's own view of the same movements: its net, its own running balance, the other side plain
+    assert [(t["txid"][:2], t["kind"], t["net_sat"], t["balance_after_sat"], t["counterpart"]) for t in treasury["transactions"]] == [
+        ("a1", "receive", 100_000, 100_000, "Exchange"),
+        ("b2", "transfer", -71_000, 29_000, "cold"),
+        ("d4", "transfer", 49_000, 78_000, "cold"),
+    ]
+    assert [(t["txid"][:2], t["kind"], t["net_sat"], t["balance_after_sat"], t["counterpart"]) for t in cold["transactions"]] == [
+        ("b2", "transfer", 70_000, 70_000, "treasury"),
+        ("c3", "send", -20_500, 49_500, "Exchange"),
+        ("d4", "transfer", -49_500, 0, "treasury"),
     ]
     assert report["totals"]["fees_sat"] == 2_000 and report["reconciliation"]["ok"] and report["node_check"] is None
     assert "wallets: cold 0.00000000 BTC, treasury 0.00078000 BTC" in format_summary(report)
     write_csv(report, tmp_path / "h.csv")
-    rows = list(csv.DictReader((tmp_path / "h.csv").open()))
-    assert [(r["category"], r["amount"], r["balance"], r["wallet"]) for r in rows] == [
-        ("receive", "0.00100000", "0.00100000", "Exchange -> treasury"),
-        ("transfer", "-0.00001000", "0.00099000", "treasury -> cold"),
-        ("send", "-0.00020500", "0.00078500", "cold -> Exchange"),
-        ("transfer", "-0.00000500", "0.00078000", "cold -> treasury"),
+    blocks = csv_blocks(tmp_path / "h.csv")
+    assert list(blocks) == ["cold", "treasury"]
+    assert [(r["category"], r["amount"], r["balance"], r["wallet"]) for r in blocks["treasury"]] == [
+        ("receive", "0.00100000", "0.00100000", "Exchange"),
+        ("transfer", "-0.00071000", "0.00029000", "cold"),
+        ("transfer", "0.00049000", "0.00078000", "cold"),
     ]
+    assert [(r["category"], r["amount"], r["balance"], r["wallet"]) for r in blocks["cold"]] == [
+        ("transfer", "0.00070000", "0.00070000", "treasury"),
+        ("send", "-0.00020500", "0.00049500", "Exchange"),
+        ("transfer", "-0.00049500", "0.00000000", "treasury"),
+    ]
+    assert (tmp_path / "h.csv").read_text().startswith("cold\ntime,txid,category,amount,balance,wallet\n")
     html = render_html(report)
     assert "From → to" in html and "treasury → cold" in html and "<td>treasury</td>" in html and "Wallets of the holder" in html
     # one wallet alone is still its own view: no transfer, no wallet column
@@ -123,14 +153,18 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
     written = json.loads((directory / f"company-{date}.json").read_text())
     assert written["label"] == "Company AB" and [w["name"] for w in written["wallets"]] == ["cold", "treasury"]
     assert written["period"]["start"]["height"] == 1000 and written["period"]["end"]["height"] == 1010 and written["period"]["to_tip"]
-    rows = list(csv.DictReader((directory / f"company-{date}.csv").open()))
-    assert [(r["category"], r["wallet"]) for r in rows] == [
-        ("receive", "Exchange -> treasury"),
-        ("transfer", "treasury -> cold"),
-        ("send", "cold -> Exchange"),
-        ("transfer", "cold -> treasury"),
+    blocks = csv_blocks(directory / f"company-{date}.csv")
+    assert [(r["category"], r["wallet"]) for r in blocks["treasury"]] == [
+        ("receive", "Exchange"),
+        ("transfer", "cold"),
+        ("transfer", "cold"),
     ]
-    assert rows[-1]["balance"] == "0.00078000"
+    assert [(r["category"], r["wallet"]) for r in blocks["cold"]] == [
+        ("transfer", "treasury"),
+        ("send", "Exchange"),
+        ("transfer", "treasury"),
+    ]
+    assert blocks["treasury"][-1]["balance"] == "0.00078000" and blocks["cold"][-1]["balance"] == "0.00000000"
     assert "https://example.org/tx/" in (directory / f"company-{date}.html").read_text()  # explorer from [holders.company]
     # a wallet's statement takes its holder's settings too
     assert cli_module.main(["report", "-w", "treasury", "--from-height", "1004", "--to-height", "1010", "-o", str(tmp_path / "t")]) == 1

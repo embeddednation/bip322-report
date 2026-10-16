@@ -93,7 +93,8 @@ key there (`dust`, `theme`, …) is a default for the holder's wallets, between
 the wallet's own table and the top level. `bip322 report
 holder KEY` merges its wallets' histories into one ledger, a transfer between
 two of them one movement of kind `transfer`, the balance the holder's total,
-under `KEY/statements/<label>/`.
+under `KEY/statements/<label>/`; its CSV is one block per wallet, under the
+wallet's name, as that wallet sees the movements.
 
 `bip322 report` prints a summary on stderr and the directory on stdout. For the
 year, made in January from the year-end snapshot:

@@ -616,8 +616,8 @@ def build_parser() -> argparse.ArgumentParser:
             "of the tree, KEY, and its wallets the wallet directories under it; [holders.KEY] in bip322.toml gives its name for the "
             "header. KEY may be left out inside the holder's directory, with holder = KEY in bip322.toml, or when the tree has one holder. "
             "Without a period the ledger runs from the block before the first transaction to the tip, labelled by the tip's date. The files "
-            "go to KEY/statements/<label>/ in the data directory, named KEY-<label>; the CSV's wallet column shows both sides "
-            "(Exchange -> treasury, treasury -> cold). Exit status as for report."
+            "go to KEY/statements/<label>/ in the data directory, named KEY-<label>; the CSV is one block per wallet, under the "
+            "wallet's name, as that wallet sees the movements. Exit status as for report."
         ),
     )
     p.add_argument(

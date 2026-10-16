@@ -50,8 +50,8 @@ def build_report(
     someone else belongs to, which names the other side of a movement (``counterpart``).
     ``wallets`` names a holder's wallets when ``history`` is their merged one
     (``holder.merge_histories``): the counterpart then shows both sides, and
-    the report carries each wallet's opening and closing balance under
-    ``wallets``.  ``node_check`` False leaves out the listunspent cross-check,
+    the report carries each wallet's opening and closing balance and the
+    movements as that wallet sees them under ``wallets``.  ``node_check`` False leaves out the listunspent cross-check,
     which is per node wallet.
 
     ``cli`` is needed to re-verify the proofs files under ``proofs_roots`` against the chain and to
@@ -134,7 +134,9 @@ def build_report(
         "fiat": rates.to_dict() if rates else None,
         "node_check": _node_check(cli, history, period, closing, dust) if cli is not None and node_check else None,
     }
-    report["wallets"] = [_wallet_balances(w, opening, closing) for w in wallets] if wallets is not None else None
+    report["wallets"] = (
+        [_wallet_block(w, opening, closing, movements, rates, addresses or {}) for w in wallets] if wallets is not None else None
+    )
     report["report_id"] = _report_id(report)
     report["ok"] = _verdict(report)
     return report
@@ -197,10 +199,64 @@ def _fiat(rates: Rates, tx: WalletTx, amount: int) -> dict:
     }
 
 
-def _wallet_balances(wallet: str, opening: list[Coin], closing: list[Coin]) -> dict:
+def _wallet_block(
+    wallet: str, opening: list[Coin], closing: list[Coin], movements: list[WalletTx], rates: Rates | None, names: dict[str, str]
+) -> dict:
+    """One wallet of a holder: its opening and closing balance, and the period's movements as it sees them."""
     o = sum(c.amount_sat for c in opening if c.wallet == wallet)
     s = sum(c.amount_sat for c in closing if c.wallet == wallet)
-    return {"name": wallet, "opening_sat": o, "opening_btc": btc(o), "closing_sat": s, "closing_btc": btc(s)}
+    rows = _wallet_rows(movements, wallet, o, rates, names)
+    return {"name": wallet, "opening_sat": o, "opening_btc": btc(o), "closing_sat": s, "closing_btc": btc(s), "transactions": rows}
+
+
+def _wallet_rows(movements: list[WalletTx], wallet: str, opening_sat: int, rates: Rates | None, names: dict[str, str]) -> list[dict]:
+    """A holder's movements as one of its wallets sees them: the wallet's net (fee inside), a running balance of its own, and
+    the other side plain: another wallet of the holder's, or what ``[addresses]`` names.  A move between two of the holder's
+    wallets is a ``transfer`` on both sides."""
+    rows = []
+    running = opening_sat
+    for tx in movements:
+        spent = sum(c.amount_sat for c in tx.ours_in if c.wallet == wallet)
+        got = sum(c.amount_sat for c in tx.ours_out if c.wallet == wallet)
+        if not any(c.wallet == wallet for c in tx.ours_in + tx.ours_out):
+            continue
+        net = got - spent
+        running += net
+        kind, counterpart = _wallet_side(tx, wallet, any(c.wallet == wallet for c in tx.ours_in), names)
+        row = {
+            "txid": tx.txid,
+            "height": tx.height,
+            "time": tx.time,
+            "time_utc": tx.iso_time,
+            "kind": kind,
+            "net_sat": net,
+            "net_btc": btc(net),
+            "balance_after_sat": running,
+            "balance_after_btc": btc(running),
+            "counterpart": counterpart,
+        }
+        if rates:
+            rate = rates.rate_on(tx.time)
+            row["fiat"] = {"currency": rates.currency, "rate": str(rate) if rate is not None else None, "net": rates.value(net, tx.time)}
+        rows.append(row)
+    return rows
+
+
+def _wallet_side(tx: WalletTx, wallet: str, spent: bool, names: dict[str, str]) -> tuple[str, str]:
+    """The kind of a holder's movement for one of its wallets, and the other side as that wallet sees it."""
+    others = sorted({c.wallet for c in tx.ours_in + tx.ours_out if c.wallet and c.wallet != wallet})  # the holder's, involved
+    theirs = _named(names, [c.address for c in tx.others_out if c.address])
+    if tx.kind == "swept":
+        return "swept", ", ".join(_named(names, tx.payers))
+    if not spent:
+        if tx.ours_in:  # paid by another wallet of the holder's
+            return "transfer", ", ".join(sorted({c.wallet for c in tx.ours_in if c.wallet}))
+        return "receive", ", ".join(_named(names, tx.payers))
+    if tx.mixed:
+        return "mixed", ", ".join(theirs + _named(names, tx.payers) + others)
+    if not tx.others_out:
+        return ("transfer", ", ".join(others)) if others else ("internal", wallet)
+    return "send", ", ".join(theirs + others)
 
 
 def _named(names: dict[str, str], addresses) -> list[str]:
