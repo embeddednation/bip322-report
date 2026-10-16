@@ -76,10 +76,10 @@ def _cli(args, config: Config, wallet: str | None) -> BitcoinCli:
     return cli
 
 
-def _setting(args, config: Config, name: str, key: str, wallet: str | None, default=None):
-    """An option's value: the command line, else bip322.toml (the wallet's table, then the top level), else ``default``."""
+def _setting(args, config: Config, name: str, key: str, wallet: str | None, default=None, *, holder: str | None = None):
+    """An option's value: the command line, else bip322.toml (the wallet's table, its holder's, then the top level), else ``default``."""
     given = getattr(args, name, None)
-    return given if given is not None else config.get(key, wallet, default)
+    return given if given is not None else config.get(key, wallet, default, holder=holder)
 
 
 def _add_node_args(p: argparse.ArgumentParser) -> None:
@@ -111,8 +111,8 @@ def _check_history(cli: BitcoinCli, history: History, source: str) -> None:
         )
 
 
-def _theme(args, config: Config, wallet: str | None) -> str:
-    theme = str(_setting(args, config, "theme", "theme", wallet, DEFAULT_THEME))
+def _theme(args, config: Config, wallet: str | None, *, holder: str | None = None) -> str:
+    theme = str(_setting(args, config, "theme", "theme", wallet, DEFAULT_THEME, holder=holder))
     if theme not in THEMES:
         raise CLIError(f"theme {theme!r} is not one of {', '.join(THEMES)}")
     return theme
@@ -262,8 +262,8 @@ def _rates(args) -> Rates | None:
     return None
 
 
-def _dust(args, config: Config, wallet: str | None) -> int:
-    dust = _setting(args, config, "dust", "dust", wallet, 0)
+def _dust(args, config: Config, wallet: str | None, *, holder: str | None = None) -> int:
+    dust = _setting(args, config, "dust", "dust", wallet, 0, holder=holder)
     if not isinstance(dust, int) or isinstance(dust, bool):
         raise CLIError(f"dust must be a number of satoshi, not {dust!r}")
     if dust < 0:
@@ -353,7 +353,18 @@ def cmd_report(args) -> int:
 
 
 def _write_statement(
-    args, config: Config, wallet: str | None, report: dict, directory: Path, stem: str, roots, chain: str, theme: str, pdf: bool
+    args,
+    config: Config,
+    wallet: str | None,
+    report: dict,
+    directory: Path,
+    stem: str,
+    roots,
+    chain: str,
+    theme: str,
+    pdf: bool,
+    *,
+    holder: str | None = None,
 ) -> int:
     """The JSON, the CSV, the proofs files cited and the PDF (or HTML) into the directory, the summary on stderr, the directory on stdout."""
     report["name"] = stem
@@ -363,10 +374,10 @@ def _write_statement(
     if not args.no_proofs and roots:
         _copy_proofs(report, roots, directory)
     print(format_summary(report), file=sys.stderr)
-    explorer = _setting(args, config, "explorer", "explorer", wallet)
+    explorer = _setting(args, config, "explorer", "explorer", wallet, holder=holder)
     if explorer is None:
         explorer = EXPLORER if chain == "main" else None
-    heading = _setting(args, config, "heading", "heading", wallet)
+    heading = _setting(args, config, "heading", "heading", wallet, holder=holder)
     if pdf:  # last: should the rendering fail, everything else is in place
         write_pdf(render_html(report, explorer=explorer, theme=theme, heading=heading, fonts_url=PACKAGE_FONTS), directory / f"{stem}.pdf")
     else:
@@ -396,9 +407,9 @@ def cmd_holder(args) -> int:
         )
     name, slug = config.holder_name(key), key
     period_label = _period_label(args) if _period_given(args) else None
-    dust = _dust(args, config, None)
+    dust = _dust(args, config, None, holder=key)
     rates = _rates(args)
-    theme = _theme(args, config, None)
+    theme = _theme(args, config, None, holder=key)
     pdf = not args.html and _pdf_possible()
     roots = [snapshots_dir(w) for w in members if snapshots_dir(w).is_dir()]
     proofs_names([path for path, _ in find_proofs(roots)])  # refuses two files under one name before any work
@@ -430,7 +441,7 @@ def cmd_holder(args) -> int:
         wallets=members,
         node_check=False,
     )
-    return _write_statement(args, config, None, report, directory, f"{slug}-{period.label}", roots, history.chain, theme, pdf)
+    return _write_statement(args, config, None, report, directory, f"{slug}-{period.label}", roots, history.chain, theme, pdf, holder=key)
 
 
 # --------------------------------------------------------------------------- #

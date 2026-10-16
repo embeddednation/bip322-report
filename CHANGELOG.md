@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.0 (2026-10-16)
+
+Needs bip322-audit 0.20: settings per holder. A key in a `[holders.KEY]`
+table of `bip322.toml` (`dust`, `theme`, `heading`, `explorer`, `cli`) applies
+to the holder's wallets, between the wallet's own table and the top level;
+`bip322 report holder KEY` reads the holder's table too.
+
 ## 0.15.0 (2026-10-15)
 
 Needs bip322-audit 0.19: holders above wallets. A holder is a directory of

@@ -110,7 +110,8 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
     for name in ("treasury", "cold"):
         (root / "company" / name / "snapshots").mkdir(parents=True)
     (root / "bip322.toml").write_text(
-        f'[holders.company]\nname = "Company AB"\n\n[addresses]\n"{EXCHANGE}" = "Exchange"\n"{OTHER}" = "Exchange"\n'
+        'explorer = ""\n[holders.company]\nname = "Company AB"\nexplorer = "https://example.org"\n'  # the holder's beats the top level
+        f'\n[addresses]\n"{EXCHANGE}" = "Exchange"\n"{OTHER}" = "Exchange"\n'
     )
     monkeypatch.chdir(root)
     assert cli_module.main(["holder"]) == 1  # the one holder needs no naming; no proofs: ATTENTION, the ledger is written all the same
@@ -130,6 +131,11 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
         ("transfer", "cold -> treasury"),
     ]
     assert rows[-1]["balance"] == "0.00078000"
+    assert "https://example.org/tx/" in (directory / f"company-{date}.html").read_text()  # explorer from [holders.company]
+    # a wallet's statement takes its holder's settings too
+    assert cli_module.main(["report", "-w", "treasury", "--from-height", "1004", "--to-height", "1010", "-o", str(tmp_path / "t")]) == 1
+    capsys.readouterr()
+    assert "https://example.org/tx/" in (tmp_path / "t" / "treasury-1004..1010.html").read_text()
     # a period, as for a wallet's statement; the holder named by its directory
     assert cli_module.main(["holder", "company", "--from-height", "1004", "--to-height", "1010"]) == 1
     out, _ = capsys.readouterr()

@@ -80,7 +80,8 @@ the holder, and are backed up like the wallet's own records. The statements
 are what leaves.
 
 In `bip322.toml`, top-level keys are defaults for every wallet, a
-`[wallets.NAME]` table is for one, and the command line beats both:
+`[holders.KEY]` table overrides them for the holder's wallets, a
+`[wallets.NAME]` table for one, and the command line beats all:
 
 ```toml
 holder = "company"                  # the default holder: a new -w NAME is made in its directory
@@ -90,6 +91,7 @@ dust = 1000                         # satoshi; see --dust
 
 [holders.company]
 name = "Company AB"                 # the statements' header (default: the key)
+text = "Proof of control, Company AB (556123-4567), {date}"   # for the holder's wallets
 
 [wallets.treasury]
 node = "treasury-2of3-main"         # the node wallet, when its name is not the directory's
@@ -120,7 +122,8 @@ bip322 report holder company          # -> company/statements/2026-10-15/: compa
 
 A holder is a directory of the tree, and its wallets are the wallet
 directories under it; `[holders.KEY]` in `bip322.toml` gives the name the
-statements put in their header, else the directory's name is it. The holder
+statements put in their header, else the directory's name is it, and any
+other key there is a default for the holder's wallets. The holder
 may be left off the command inside its directory, with `holder = KEY` in
 `bip322.toml`, or when the tree has one holder. The wallets' histories merge: a transaction that moves coins from one of the holder's
 wallets to another is one movement of kind `transfer`, its fee the only

@@ -88,7 +88,9 @@ handbook; the keys this package reads are `holder`, `wallet`, `cli`,
 `[addresses]` table: the wallet each address of someone else belongs to
 (`"bc1q..." = "Exchange"`), which names the other side of a movement.
 A holder is a directory of the tree with its wallets' directories under it;
-`[holders.KEY]` gives its `name` for the statements' header. `bip322 report
+`[holders.KEY]` gives its `name` for the statements' header, and any other
+key there (`dust`, `theme`, …) is a default for the holder's wallets, between
+the wallet's own table and the top level. `bip322 report
 holder KEY` merges its wallets' histories into one ledger, a transfer between
 two of them one movement of kind `transfer`, the balance the holder's total,
 under `KEY/statements/<label>/`.
