@@ -159,7 +159,21 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
     date = datetime.fromtimestamp(block_time(1010), UTC).strftime("%Y-%m-%d")
     assert out.strip() == str(root / "company" / "statements" / date) and "wallets: treasury 0.00078000 BTC, cold 0.00000000 BTC" in err
     directory = Path(out.strip())
-    assert sorted(p.name for p in directory.iterdir()) == [f"company-{date}.csv", f"company-{date}.html", f"company-{date}.json"]
+    assert sorted(p.name for p in directory.iterdir()) == [
+        f"company-{date}-history.html",
+        f"company-{date}.csv",
+        f"company-{date}.html",
+        f"company-{date}.json",
+    ]
+    # the reader's document: each wallet a section, oldest first, the counterparty and the running balance, no txids, no proofs
+    reader = (directory / f"company-{date}-history.html").read_text()
+    assert "Transaction history" in reader and reader.index("1.</span> treasury") < reader.index("2.</span> cold")
+    assert "<th>Counterparty</th>" in reader and "<td>Received</td><td>Exchange</td>" in reader and "<td>Sent</td><td>cold</td>" in reader
+    body = reader.split("</head>")[1]  # the shared style names the statement's colours; the document itself says nothing of proofs
+    assert A not in body and B not in body and "proof" not in body.lower().replace("proofs of control", "") and "scriptPubKey" not in body
+    assert (
+        "Holdings at the end of the period: <strong>0.00078000 BTC</strong>, in 2 wallets: treasury 0.00078000, cold 0.00000000." in reader
+    )
     written = json.loads((directory / f"company-{date}.json").read_text())
     assert written["label"] == "Company AB" and [w["name"] for w in written["wallets"]] == ["treasury", "cold"]
     assert written["period"]["start"]["height"] == 1000 and written["period"]["end"]["height"] == 1010 and written["period"]["to_tip"]

@@ -1,0 +1,107 @@
+{# the look of both documents: the theme's colours and typefaces, the printed page with `doc` as its running head #}
+<style>
+  /* Source Serif 4 and Source Sans 3 (Adobe), JetBrains Mono (JetBrains): SIL Open Font License 1.1 */
+  {% for f in faces %}
+  @font-face { font-family: "{{ f.family }}"; src: url("{{ f.url }}") format("woff2"); font-weight: {{ f.weight }}; font-style: {{ f.style }}; }
+  {% endfor %}
+  /* colours and typefaces come from the theme (render.Theme) */
+  :root { --bg: {{ t.bg }}; --ink: {{ t.ink }}; --strong: {{ t.strong }}; --muted: {{ t.muted }}; --rule: {{ t.rule }}; --rule-strong: {{ t.rule_strong }};
+    --head: {{ t.head }}; --zebra: {{ t.zebra }}; --accent: {{ t.accent }}; --ok: {{ t.ok }}; --bad: {{ t.bad }}; --on-pill: {{ t.on_pill }}; --term-ink: {{ t.term_ink }};
+    --font-body: {{ t.font_body | safe }}; --font-heading: {{ t.font_heading | safe }}; --font-label: {{ t.font_label | safe }}; --font-mono: {{ t.font_mono | safe }};
+    --c-script: {{ t.script }}; --c-block: {{ t.block }}; --c-proof: {{ t.proof }}; --c-utxo: {{ t.utxo }}; --c-amount: {{ t.amount }}; --c-good: {{ t.good }}; --c-bad: {{ t.bad_text }}; }
+
+  /* the printed page: its margins, and the running lines at its head and foot */
+  @page {
+    size: A4; margin: 22mm 16mm 20mm 16mm; background: {{ t.bg }};
+    @top-left { content: "{{ doc }}"; font: 7.5pt {{ t.font_label | safe }}; color: {{ t.muted }}; }
+    @top-right { content: string(doc-title); font: 7.5pt {{ t.font_label | safe }}; color: {{ t.muted }}; }
+    @bottom-left { content: "Reference " string(ref) " · generated " string(generated); font: 7.5pt {{ t.font_label | safe }}; color: {{ t.muted }}; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 7.5pt {{ t.font_label | safe }}; color: {{ t.muted }}; }
+  }
+  span.meta { string-set: generated attr(data-generated), ref attr(data-ref); }
+  .page { break-before: page; }
+  .keep { break-inside: avoid; }
+
+  /* text */
+  html { font: 9.5pt/1.45 var(--font-body); color: var(--ink); background: var(--bg); }
+  body { margin: 0; }
+  h1, h2, h3 { font-family: var(--font-heading); }
+  .eyebrow, table, .badge, .pill, .small { font-family: var(--font-label); }
+  {% if t.oldstyle %}p { font-variant-numeric: oldstyle-nums; }{% endif %}
+  p { margin: 4px 0 8px; }
+  strong { color: var(--strong); }
+  a { color: inherit; text-decoration: none; }
+  .muted { color: var(--muted); }
+  .small { font-size: 8pt; }
+  .mono, code { font-family: var(--font-mono); font-size: 7.5pt; overflow-wrap: anywhere; word-break: break-all; }
+  .ok { color: var(--ok); font-weight: 700; } .bad { color: var(--bad); font-weight: 700; }
+  .runin p { margin: 0 0 6px; }
+
+  /* headings; a section's is set in the theme's style (render.HEADINGS) */
+  h1 { font-size: 14pt; line-height: 1.2; margin: 0; letter-spacing: -0.01em; overflow-wrap: anywhere; color: var(--strong); string-set: doc-title content(); }
+  h2 { font-size: 12pt; color: var(--accent); margin: 24px 0 8px; padding-bottom: 4px; border-bottom: 2px solid var(--accent); break-after: avoid; }
+  {% set red = t.tab or t.bad %}
+  {% if t.heading == "tab" %}
+  h2 { color: var(--strong); border-bottom: 0; border-top: 1px solid var(--rule); padding: 0; }
+  h2::before { content: ""; display: block; width: 36px; height: 4px; background: {{ red }}; margin: -1px 0 8px; }
+  {% elif t.heading == "number" %}
+  h2 { color: var(--strong); border-bottom: 0; padding-bottom: 0; }
+  h2 .n { color: {{ red }}; }
+  {% elif t.heading == "redrule" %}
+  h2 { color: var(--strong); border-bottom: 1px solid {{ red }}; }
+  {% endif %}
+  h2.attention { color: var(--bad); border-color: var(--bad); }
+  .page h2 { font-size: 11pt; overflow-wrap: anywhere; word-break: break-all; }
+  .page h2 .mono { font: inherit; }
+  h3 { font-size: 10pt; margin: 14px 0 4px; color: var(--strong); break-after: avoid; }
+  h3.notes { margin-top: 30px; }
+
+  /* the statement's head: title, result, period */
+  .head { display: table; width: 100%; margin-bottom: 8px; }
+  .head > div { display: table-cell; vertical-align: top; }
+  .head .result { text-align: right; width: 26%; }
+  .eyebrow { font-size: 8pt; letter-spacing: 0.12em; text-transform: uppercase; color: {{ t.tab or "var(--muted)" }}; margin: 0 0 6px; font-weight: 600; }
+  .pill { display: inline-block; padding: 3px 12px; border-radius: 999px; font-weight: 700; font-size: 9.5pt; }
+  .pill.bad { background: var(--bad); color: var(--on-pill); }
+  .period { font-family: var(--font-label); font-size: 9.5pt; color: var(--muted); margin: 2px 0 18px; }
+  .period .when { color: var(--strong); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* tables */
+  table { border-collapse: collapse; width: 100%; margin: 4px 0 10px; font-size: 8.8pt; table-layout: fixed; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--rule); vertical-align: top; overflow-wrap: anywhere; }
+  th { background: var(--head); color: var(--strong); font-weight: 600; font-size: 8pt; letter-spacing: 0.03em; border-bottom: 1.5px solid var(--rule-strong); }
+  tbody tr:nth-child(even) td { background: var(--zebra); }
+  tr { break-inside: avoid; }
+  tr.open td { font-weight: 700; color: var(--strong); }
+  tr.total td { font-weight: 700; color: var(--strong); background: var(--bg); border-top: 1px solid var(--rule-strong); border-bottom: 3px double var(--rule-strong); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  col.w-date { width: 13%; } col.w-kind { width: 9%; } col.w-num { width: 13%; } col.w-btc { width: 13%; }
+  .kv td:first-child { width: 30%; color: var(--muted); }
+  .checks td:first-child { width: 4%; font-weight: 700; text-align: center; }
+
+  /* a UTXO's page: tables of a name and its value, without stripes */
+  table.coins tbody { break-inside: avoid; }
+  table.coins tbody tr td { background: var(--bg); border-bottom: 0; }
+  table.coins tbody tr.last td { border-bottom: 1px solid var(--rule); }
+  table.coins tr.lead td { padding-top: 10px; border-top: 1px solid var(--rule); }
+  table.coins tbody:first-of-type tr.lead td { border-top: 0; }
+  table.coins td.addr { font-size: 9pt; } table.coins td.addr .mono { font-size: 8.5pt; }
+  .page table.coins td.addr, .page table.coins td.addr .mono { font-size: 7.5pt; }
+  table.coins td.k { color: var(--muted); font-size: 8pt; padding-top: 6px; overflow-wrap: normal; }
+  code.msg, .sig { white-space: pre-wrap; display: block; line-height: 1.35; }
+  .badge { display: inline-block; padding: 0 6px; border-radius: 3px; font-size: 7.5pt; font-weight: 600; border: 1px solid; line-height: 1.5; background: var(--bg); }
+  .badge.bad { color: var(--bad); border-color: var(--bad); }
+
+  /* commands and their output, and the values a reader matches in them: one thing, one colour */
+  pre { margin: 0; font-family: var(--font-mono); font-size: 7.5pt; line-height: 1.35; white-space: pre; overflow-x: hidden; }
+  pre.out { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
+  .term { color: var(--term-ink); padding: 3px 0 2px; margin: 0 0 2px; }
+  .hl-script { color: var(--c-script); } .hl-utxo { color: var(--c-utxo); } .hl-block { color: var(--c-block); }
+  .hl-proof { color: var(--c-proof); } .hl-amount { color: var(--c-amount); }
+  .hl-ok { color: var(--c-good); font-weight: 700; } .hl-bad { color: var(--c-bad); font-weight: 700; }
+  .hl-hash { color: {{ t.hash }}; } .hl-txid { color: {{ t.txid }}; }
+
+  /* the figure of section 4 */
+  svg.fig { width: 100%; height: auto; margin: 6px 0 2px; }
+  .caption { font-size: 8pt; color: var(--muted); margin: 0 0 10px; }
+</style>

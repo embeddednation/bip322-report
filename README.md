@@ -73,11 +73,12 @@ bip322 audit snapshot --skip-proven
 
 # the year's statement
 bip322 report --year 2026
-#   -> company/treasury/statements/2026/: treasury-2026.pdf (or .html), .json, .csv, and the proofs files it cites
+#   -> company/treasury/statements/2026/: treasury-2026.pdf (or .html), .json, .csv, the proofs files it cites,
+#      and treasury-2026-history.pdf: the movements for a reader, no proofs, no txids
 
 # the holder's ledger over every wallet under company/, from the first reception to now
 bip322 report holder company
-#   -> company/statements/2026-10-15/: company-2026-10-15.pdf (or .html), .json, .csv, and the proofs files it cites
+#   -> company/statements/2026-10-15/: company-2026-10-15.pdf (or .html), .json, .csv, the proofs files it cites, and -history.pdf
 ```
 
 The wallet is `-w NAME`, else the wallet directory the command runs in, else

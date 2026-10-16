@@ -61,6 +61,7 @@ does, and the wallet names the rest:
         2026/
           treasury-2026.pdf  treasury-2026.json  treasury-2026.csv
           treasury-2026-10-09-920114-proofs.json
+          treasury-2026-history.pdf         # the movements for a reader: no proofs, no txids
       history.json                        # the history last read from the node
     cold/
       snapshots/
@@ -121,7 +122,7 @@ fill in by hand.
 A holder with several wallets gets one ledger over all of them:
 
 ```sh
-bip322 report holder company          # -> company/statements/2026-10-15/: company-2026-10-15.pdf (or .html), .json, .csv
+bip322 report holder company          # -> company/statements/2026-10-15/: company-2026-10-15.pdf (or .html), .json, .csv, -history.pdf
 ```
 
 A holder is a directory of the tree, and its wallets are the wallet
@@ -143,6 +144,14 @@ between two of the holder's wallets is a send in one block and a receive in
 the other, as in each wallet's own statement. The proofs
 come from every wallet's `snapshots/`, so each coin held is also one the
 holder has proven control of.
+
+Beside every statement, the wallet's or the holder's, goes
+`<name>-history.pdf`: the same movements for a reader who is not the
+auditor, a bank or a partner asked for the history. Each wallet is a section,
+oldest first, with the date, the kind in plain words, the counterparty, the
+amount and the running balance; no transaction identifiers, no proofs, no
+addresses. The statement with the proofs stays with the auditor, and the
+two carry the same reference.
 
 Every history read from the node is kept in the wallet's directory as
 `history.json`. A wallet the node has not loaded any more, an old one that

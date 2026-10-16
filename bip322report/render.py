@@ -306,6 +306,29 @@ def _figure_message(report: dict) -> dict:
     return {"title": title, "block": f"{stamp['height']} {str(stamp['hash'])[:6]}…"}
 
 
+STATEMENT = "Statement of bitcoin holdings and movements"
+HISTORY = "Transaction history"
+KINDS = {  # a movement's kind, in the reader's words
+    "receive": "Received",
+    "send": "Sent",
+    "internal": "Internal move",
+    "mixed": "Joint transaction",
+    "swept": "Dust swept",
+    "transfer": "Transfer",
+}
+
+
+def _look(theme: str, heading: str | None, fonts_url: str | None) -> tuple[dict, list[dict]]:
+    """The theme with the heading style applied, and the font faces: embedded, unless ``fonts_url`` says where to reference them."""
+    if theme not in THEMES:
+        raise ValueError(f"unknown theme {theme!r}; one of {', '.join(THEMES)}")
+    if heading is not None and heading not in HEADINGS:
+        raise ValueError(f"unknown heading style {heading!r}; one of {', '.join(HEADINGS)}")
+    t = {**THEMES[theme], "heading": heading or THEMES[theme]["heading"]}
+    faces = [{"family": f, "url": _font_url(file, fonts_url), "weight": w, "style": s} for f, file, w, s in FONT_FACES]
+    return t, faces
+
+
 def render_html(
     report: dict,
     *,
@@ -316,14 +339,34 @@ def render_html(
 ) -> str:
     """The statement as HTML, one self-contained file: the fonts are embedded, unless ``fonts_url`` says where to reference them
     (``PACKAGE_FONTS`` for a PDF rendered on this machine).  ``heading`` overrides the theme's heading style."""
-    if theme not in THEMES:
-        raise ValueError(f"unknown theme {theme!r}; one of {', '.join(THEMES)}")
-    if heading is not None and heading not in HEADINGS:
-        raise ValueError(f"unknown heading style {heading!r}; one of {', '.join(HEADINGS)}")
-    t = {**THEMES[theme], "heading": heading or THEMES[theme]["heading"]}
-    faces = [{"family": f, "url": _font_url(file, fonts_url), "weight": w, "style": s} for f, file, w, s in FONT_FACES]
+    t, faces = _look(theme, heading, fonts_url)
     fig = _figure_message(report)
-    return _env().get_template("report.html").render(r=report, explorer=(explorer or "").rstrip("/") or None, t=t, faces=faces, fig=fig)
+    return (
+        _env()
+        .get_template("report.html")
+        .render(r=report, explorer=(explorer or "").rstrip("/") or None, t=t, faces=faces, fig=fig, doc=STATEMENT)
+    )
+
+
+def render_history_html(report: dict, *, theme: str = "journal", heading: str | None = None, fonts_url: str | None = None) -> str:
+    """The transaction history as HTML, for a reader: the movements of each wallet with the counterparty and the running balance,
+    no transaction identifiers, no proofs; the holder's wallets each a section, oldest first, a wallet's statement one."""
+    t, faces = _look(theme, heading, fonts_url)
+    return _env().get_template("history.html").render(r=report, blocks=_history_blocks(report), t=t, faces=faces, doc=HISTORY, kinds=KINDS)
+
+
+def _history_blocks(report: dict) -> list[dict]:
+    """The reader's document in blocks: the holder's wallets as the report has them, else the one wallet."""
+    if report.get("wallets"):
+        return report["wallets"]
+    return [
+        {
+            "name": report["label"],
+            "opening_btc": report["opening"]["total_btc"],
+            "closing_btc": report["closing"]["total_btc"],
+            "transactions": report["transactions"],
+        }
+    ]
 
 
 def _font_url(file: str, fonts_url: str | None) -> str:

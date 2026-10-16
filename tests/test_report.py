@@ -280,6 +280,7 @@ def test_cli_end_to_end_with_fake_node(tmp_path, wallet, signer_expressions, mon
     assert not any(p.suffix == ".psbt" for p in Path("out").rglob("*")) and written["proofs_files"][0]["file"] == "one-proofs.json"
     assert sorted(p.name for p in Path("out").iterdir()) == [
         "one-proofs.json",
+        "watch-1000..1012-history.html",
         "watch-1000..1012.csv",
         "watch-1000..1012.html",
         "watch-1000..1012.json",

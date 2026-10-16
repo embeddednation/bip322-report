@@ -59,7 +59,11 @@ def _place(bundles: Path, target: Path, name: str) -> Path:
 
 def _written(directory: str, suffix: str) -> Path:
     """The statement's file with this suffix: ``<wallet>-<label><suffix>`` in the directory, whatever -o named the directory."""
-    found = [p for p in Path(directory).iterdir() if p.name.endswith(suffix) and not p.name.endswith("-proofs.json")]
+    found = [
+        p
+        for p in Path(directory).iterdir()
+        if p.name.endswith(suffix) and not p.name.endswith("-proofs.json") and "-history." not in p.name
+    ]
     assert len(found) == 1, found
     return found[0]
 
@@ -77,7 +81,7 @@ def test_proofs_files_are_cited_and_copied_under_their_own_names(bundles, wallet
     for name in ("a0", "a1"):
         assert Path(f"out/{name}-proofs.json").read_bytes() == (bundles / name / f"{name}-proofs.json").read_bytes()
     assert sorted(p.name for p in Path("out").iterdir()) == [
-        "a0-proofs.json", "a1-proofs.json", "watch-979..1000.csv", "watch-979..1000.html", "watch-979..1000.json",
+        "a0-proofs.json", "a1-proofs.json", "watch-979..1000-history.html", "watch-979..1000.csv", "watch-979..1000.html", "watch-979..1000.json",
     ]  # fmt: skip
     cited = {c["proof"]["file"] for c in written["closing"]["coins"]}
     assert cited == {"a0-proofs.json", "a1-proofs.json"} and str(bundles) not in _written("out", ".json").read_text()  # never a path
@@ -329,6 +333,7 @@ def test_the_statement_is_a_pdf_when_it_can_be_and_html_otherwise(bundles, walle
     assert code == 0 and "no PDF (WeasyPrint is not installed or lacks Pango): the statement is watch-979..1000.html" in err
     assert sorted(p.name for p in Path("h").iterdir()) == [
         "full-proofs.json",
+        "watch-979..1000-history.html",
         "watch-979..1000.csv",
         "watch-979..1000.html",
         "watch-979..1000.json",
@@ -339,9 +344,10 @@ def test_the_statement_is_a_pdf_when_it_can_be_and_html_otherwise(bundles, walle
     written: list = []
     monkeypatch.setattr(cli_module, "write_pdf", lambda html, path: written.append(path))
     code, _, err = run(node, "report", *HEIGHTS, "--snapshots", bundles / "full", "-o", "p", pdf=True)
-    assert code == 0 and "no PDF" not in err and written == [Path("p/watch-979..1000.pdf")] and not Path("p/watch-979..1000.html").exists()
+    both = [Path("p/watch-979..1000.pdf"), Path("p/watch-979..1000-history.pdf")]  # the statement, and the history for a reader
+    assert code == 0 and "no PDF" not in err and written == both and not Path("p/watch-979..1000.html").exists()
     code, _, err = run(node, "report", *HEIGHTS, "--snapshots", bundles / "full", "--html", "-o", "p2", pdf=True)  # asked for, PDF or not
-    assert code == 0 and written == [Path("p/watch-979..1000.pdf")] and Path("p2/watch-979..1000.html").exists()
+    assert code == 0 and written == both and Path("p2/watch-979..1000.html").exists() and Path("p2/watch-979..1000-history.html").exists()
 
 
 def test_pdf_is_written_last(bundles, wallet, run, monkeypatch):

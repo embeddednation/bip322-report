@@ -112,7 +112,9 @@ statement's files and the proofs files it copies beside itself say what they
 are on any disk. The statement is one document, the PDF when WeasyPrint is
 there and otherwise an HTML file with the fonts embedded, plus the JSON (the
 record the PDF was rendered from, which the reference hashes) and the CSV
-(the movements for a spreadsheet); nothing else, no subdirectory.
+(the movements for a spreadsheet) and the history (the movements for a
+reader who is not the auditor: no proofs, no identifiers); nothing else, no
+subdirectory.
 
 ## What is left out on purpose
 

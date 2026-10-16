@@ -47,7 +47,7 @@ from .history import History, fetch_history
 from .holder import merge_histories
 from .names import counterparts, name_by_wallets
 from .period import Period, block, last_block_before, parse_when, period_between, period_for_heights, period_for_year
-from .render import HEADINGS, PACKAGE_FONTS, THEMES, render_html, write_csv, write_pdf
+from .render import HEADINGS, PACKAGE_FONTS, THEMES, render_history_html, render_html, write_csv, write_pdf
 from .report import build_report, format_summary
 
 EXPLORER = "https://mempool.space"  # mainnet only: on another chain its links would lead to the wrong transactions
@@ -451,10 +451,12 @@ def _write_statement(
     heading = _setting(args, config, "heading", "heading", wallet, holder=holder)
     if pdf:  # last: should the rendering fail, everything else is in place
         write_pdf(render_html(report, explorer=explorer, theme=theme, heading=heading, fonts_url=PACKAGE_FONTS), directory / f"{stem}.pdf")
+        write_pdf(render_history_html(report, theme=theme, heading=heading, fonts_url=PACKAGE_FONTS), directory / f"{stem}-history.pdf")
     else:
         if not args.html:
             print(f"no PDF (WeasyPrint is not installed or lacks Pango): the statement is {stem}.html", file=sys.stderr)
         (directory / f"{stem}.html").write_text(render_html(report, explorer=explorer, theme=theme, heading=heading))
+        (directory / f"{stem}-history.html").write_text(render_history_html(report, theme=theme, heading=heading))
     print(str(directory))
     return 0 if report["ok"] else 1
 
@@ -650,7 +652,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "report",
-        help="the statement for a period: <wallet>-<label>.pdf (or .html), .json, .csv and the proofs files it cites, "
+        help="the statement for a period: <wallet>-<label>.pdf (or .html), .json, .csv, the proofs files it cites, and "
+        "<wallet>-<label>-history.pdf, the movements for a reader, "
         "under the wallet's statements/<label>/; the default command",
         description=(
             "Opening and closing balances, every movement between them, a reconciliation, and for each closing output the BIP-322 proof of "
@@ -684,7 +687,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "holder",
         help="the holder's ledger over all its wallets, from the first reception to now unless a period is given: "
-        "<holder>-<label>.pdf (or .html), .json, .csv and the proofs files it cites, under <holder>/statements/<label>/",
+        "<holder>-<label>.pdf (or .html), .json, .csv, the proofs files it cites, and <holder>-<label>-history.pdf for a reader, "
+        "under <holder>/statements/<label>/",
         description=(
             "One statement for a holder with several wallets: their histories merged, a transfer between two of them one movement "
             "(kind transfer, its fee the only cost), every coin with its wallet, the balance the holder's total. A holder is a directory "

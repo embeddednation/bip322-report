@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.21.0 (2026-10-16)
+
+A document for the reader who is not the auditor: beside every statement,
+`<name>-history.pdf` (or `.html`) carries the movements alone, each wallet
+a section, oldest first, with the date, the kind in plain words, the
+counterparty, the amount and the running balance; no transaction
+identifiers, no addresses, no proofs. The statement and the history share
+the reference and the theme.
+
 ## 0.20.0 (2026-10-16)
 
 Old wallets need not stay loaded. Every history read from the node is kept
