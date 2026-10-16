@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.0 (2026-10-16)
+
+In the holder's CSV a move between two of the holder's wallets is a `send`
+in one block and a `receive` in the other, as in each wallet's own
+statement; the wallet column already names the other wallet. `transfer`
+remains the kind of the merged movement in the statement's table.
+
 ## 0.18.0 (2026-10-16)
 
 The wallets of the tree name their own addresses: for every address on the

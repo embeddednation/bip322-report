@@ -223,7 +223,7 @@ def _wallet_block(
 def _wallet_rows(movements: list[WalletTx], wallet: str, opening_sat: int, rates: Rates | None, names: dict[str, str]) -> list[dict]:
     """A holder's movements as one of its wallets sees them: the wallet's net (fee inside), a running balance of its own, and
     the other side plain: another wallet of the holder's, or what ``[addresses]`` names.  A move between two of the holder's
-    wallets is a ``transfer`` on both sides."""
+    wallets is a send on one side and a receive on the other, as in each wallet's own statement."""
     rows = []
     running = opening_sat
     for tx in movements:
@@ -233,7 +233,7 @@ def _wallet_rows(movements: list[WalletTx], wallet: str, opening_sat: int, rates
             continue
         net = got - spent
         running += net
-        kind, counterpart = _wallet_side(tx, wallet, any(c.wallet == wallet for c in tx.ours_in), names)
+        kind, counterpart = _wallet_side(tx, wallet, any(c.wallet == wallet for c in tx.ours_in), net, names)
         row = {
             "txid": tx.txid,
             "height": tx.height,
@@ -253,20 +253,18 @@ def _wallet_rows(movements: list[WalletTx], wallet: str, opening_sat: int, rates
     return rows
 
 
-def _wallet_side(tx: WalletTx, wallet: str, spent: bool, names: dict[str, str]) -> tuple[str, str]:
+def _wallet_side(tx: WalletTx, wallet: str, spent: bool, net: int, names: dict[str, str]) -> tuple[str, str]:
     """The kind of a holder's movement for one of its wallets, and the other side as that wallet sees it."""
     others = sorted({c.wallet for c in tx.ours_in + tx.ours_out if c.wallet and c.wallet != wallet})  # the holder's, involved
     theirs = _named(names, [c.address for c in tx.others_out if c.address])
     if tx.kind == "swept":
         return "swept", ", ".join(_named(names, tx.payers))
-    if not spent:
-        if tx.ours_in:  # paid by another wallet of the holder's
-            return "transfer", ", ".join(sorted({c.wallet for c in tx.ours_in if c.wallet}))
-        return "receive", ", ".join(_named(names, tx.payers))
+    if not spent:  # paid by another wallet of the holder's, or by others
+        return "receive", ", ".join(sorted({c.wallet for c in tx.ours_in if c.wallet}) if tx.ours_in else _named(names, tx.payers))
     if tx.mixed:
         return "mixed", ", ".join(theirs + _named(names, tx.payers) + others)
-    if not tx.others_out:
-        return ("transfer", ", ".join(others)) if others else ("internal", wallet)
+    if not tx.others_out:  # within the holder: its own wallet, or another of the holder's on the other side
+        return ("internal", wallet) if not others else ("receive" if net > 0 else "send", ", ".join(others))
     return "send", ", ".join(theirs + others)
 
 

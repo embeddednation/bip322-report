@@ -87,13 +87,13 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
     # each wallet's own view of the same movements: its net, its own running balance, the other side plain
     assert [(t["txid"][:2], t["kind"], t["net_sat"], t["balance_after_sat"], t["counterpart"]) for t in treasury["transactions"]] == [
         ("a1", "receive", 100_000, 100_000, "Exchange"),
-        ("b2", "transfer", -71_000, 29_000, "cold"),
-        ("d4", "transfer", 49_000, 78_000, "cold"),
+        ("b2", "send", -71_000, 29_000, "cold"),
+        ("d4", "receive", 49_000, 78_000, "cold"),
     ]
     assert [(t["txid"][:2], t["kind"], t["net_sat"], t["balance_after_sat"], t["counterpart"]) for t in cold["transactions"]] == [
-        ("b2", "transfer", 70_000, 70_000, "treasury"),
+        ("b2", "receive", 70_000, 70_000, "treasury"),
         ("c3", "send", -20_500, 49_500, "Exchange"),
-        ("d4", "transfer", -49_500, 0, "treasury"),
+        ("d4", "send", -49_500, 0, "treasury"),
     ]
     assert report["totals"]["fees_sat"] == 2_000 and report["reconciliation"]["ok"] and report["node_check"] is None
     assert "wallets: treasury 0.00078000 BTC, cold 0.00000000 BTC" in format_summary(report)
@@ -102,13 +102,13 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
     assert list(blocks) == ["treasury", "cold"]
     assert [(r["category"], r["amount"], r["balance"], r["wallet"]) for r in blocks["treasury"]] == [
         ("receive", "0.00100000", "0.00100000", "Exchange"),
-        ("transfer", "-0.00071000", "0.00029000", "cold"),
-        ("transfer", "0.00049000", "0.00078000", "cold"),
+        ("send", "-0.00071000", "0.00029000", "cold"),
+        ("receive", "0.00049000", "0.00078000", "cold"),
     ]
     assert [(r["category"], r["amount"], r["balance"], r["wallet"]) for r in blocks["cold"]] == [
-        ("transfer", "0.00070000", "0.00070000", "treasury"),
+        ("receive", "0.00070000", "0.00070000", "treasury"),
         ("send", "-0.00020500", "0.00049500", "Exchange"),
-        ("transfer", "-0.00049500", "0.00000000", "treasury"),
+        ("send", "-0.00049500", "0.00000000", "treasury"),
     ]
     assert (tmp_path / "h.csv").read_text().startswith("treasury\ntime,txid,category,amount,balance,wallet\n")
     html = render_html(report)
@@ -159,13 +159,13 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
     blocks = csv_blocks(directory / f"company-{date}.csv")
     assert [(r["category"], r["wallet"]) for r in blocks["treasury"]] == [
         ("receive", "Exchange"),
-        ("transfer", "cold"),
-        ("transfer", "cold"),
+        ("send", "cold"),
+        ("receive", "cold"),
     ]
     assert [(r["category"], r["wallet"]) for r in blocks["cold"]] == [
-        ("transfer", "treasury"),
+        ("receive", "treasury"),
         ("send", "Exchange"),
-        ("transfer", "treasury"),
+        ("send", "treasury"),
     ]
     assert blocks["treasury"][-1]["balance"] == "0.00078000" and blocks["cold"][-1]["balance"] == "0.00000000"
     assert "https://example.org/tx/" in (directory / f"company-{date}.html").read_text()  # explorer from [holders.company]

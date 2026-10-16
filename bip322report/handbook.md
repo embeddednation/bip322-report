@@ -138,7 +138,8 @@ CSV has the same six columns in one block per wallet, the wallet's name on a
 line of its own above the header: the movements as that wallet sees them, the
 amount its net, the balance its own, the `wallet` column the other side, another
 wallet of the holder's (`cold`) or what `[addresses]` names (`Exchange`); a move
-between two of the holder's wallets is a `transfer` in both blocks. The proofs
+between two of the holder's wallets is a send in one block and a receive in
+the other, as in each wallet's own statement. The proofs
 come from every wallet's `snapshots/`, so each coin held is also one the
 holder has proven control of.
 
