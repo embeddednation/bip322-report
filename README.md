@@ -86,7 +86,9 @@ statement elsewhere, `--dir DIR` names the data directory from elsewhere. The tr
 handbook; the keys this package reads are `holder`, `wallet`, `cli`,
 `dust`, `theme`, `heading`, `explorer`, `node` per wallet, `name` per holder, and the
 `[addresses]` table: the wallet each address of someone else belongs to
-(`"bc1q..." = "Exchange"`), which names the other side of a movement.
+(`"bc1q..." = "Exchange"`), which names the other side of a movement; the
+wallets of the tree name their own addresses, so a move between two of them
+needs no entry.
 A holder is a directory of the tree with its wallets' directories under it;
 `[holders.KEY]` gives its `name` for the statements' header, and any other
 key there (`dust`, `theme`, …) is a default for the holder's wallets, between
@@ -262,8 +264,9 @@ The wallet is named by the node wallet's name; `--holder NAME` puts the holder's
   side's wallet as `[addresses]` names it. The CSV is the movements for a
   spreadsheet: `time, txid, category, amount, balance, wallet`, the amount
   being the wallet's net with the fee inside, the balance its running sum,
-  and the wallet the other side's name, empty when nothing names it, to
-  fill in by hand; `rate` and `amount_fiat` follow when rates are given.
+  and the wallet the other side's name (a wallet of the tree, or what
+  `[addresses]` says), empty when nothing names it, to fill in by hand;
+  `rate` and `amount_fiat` follow when rates are given.
   Unconfirmed transactions are listed apart and count in no balance;
   abandoned and replaced ones are not listed.
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.18.0 (2026-10-16)
+
+The wallets of the tree name their own addresses: for every address on the
+other side of a movement that `[addresses]` does not name, each other wallet
+of the tree is asked, on its node, whether the address is its, and the
+wallet column says so. A move between two wallets of the holder's, or to
+another holder's wallet, needs no entry. A wallet that cannot be asked is
+skipped with a line on stderr. The holder's wallets come oldest first, by
+their first transaction, so the wallet holding the coins now is last.
+
 ## 0.17.0 (2026-10-16)
 
 The holder's CSV is one block per wallet: the wallet's name on a line of its

@@ -51,7 +51,7 @@ def build_report(
     ``wallets`` names a holder's wallets when ``history`` is their merged one
     (``holder.merge_histories``): the counterpart then shows both sides, and
     the report carries each wallet's opening and closing balance and the
-    movements as that wallet sees them under ``wallets``.  ``node_check`` False leaves out the listunspent cross-check,
+    movements as that wallet sees them under ``wallets``, oldest wallet first.  ``node_check`` False leaves out the listunspent cross-check,
     which is per node wallet.
 
     ``cli`` is needed to re-verify the proofs files under ``proofs_roots`` against the chain and to
@@ -135,7 +135,9 @@ def build_report(
         "node_check": _node_check(cli, history, period, closing, dust) if cli is not None and node_check else None,
     }
     report["wallets"] = (
-        [_wallet_block(w, opening, closing, movements, rates, addresses or {}) for w in wallets] if wallets is not None else None
+        [_wallet_block(w, opening, closing, movements, rates, addresses or {}) for w in _wallet_order(history, wallets)]
+        if wallets is not None
+        else None
     )
     report["report_id"] = _report_id(report)
     report["ok"] = _verdict(report)
@@ -197,6 +199,15 @@ def _fiat(rates: Rates, tx: WalletTx, amount: int) -> dict:
         "net": rates.value(tx.net_sat, tx.time),
         "fee": rates.value(tx.fee_sat, tx.time) if tx.fee_sat is not None else None,
     }
+
+
+def _wallet_order(history: History, wallets: Sequence[str]) -> list[str]:
+    """The holder's wallets oldest first, by their first transaction in the history; one with none last, by name."""
+    first: dict[str, int] = {}
+    for tx in history.txs:  # chain order
+        for w in sorted({c.wallet for c in tx.ours_in + tx.ours_out if c.wallet}):
+            first.setdefault(w, len(first))
+    return sorted(wallets, key=lambda w: (first.get(w, len(first)), w))
 
 
 def _wallet_block(

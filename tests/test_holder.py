@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from bip322audit.rpc import BitcoinCli
+from bip322audit.rpc import BitcoinCli, RpcError
 from fake_node import FakeNode, block_time
 
 import bip322report.cli as cli_module
@@ -33,6 +33,7 @@ def _two_wallets(wallet) -> tuple[dict[str, FakeNode], list[str]]:
     for node in (treasury, cold):  # the transfer: both wallets see it
         node.add(B, 1003, [(A, 0)], [(c0, 70_000), (a1, 29_000)])  # fee 1,000
     cold.others[(A, 0)] = a0
+    treasury.others[(C, 1)] = c1  # the block's undo data: each node can tell the other wallet's input
     cold.add(C, 1005, [(B, 0)], [(OTHER, 20_000), (c1, 49_500)])  # cold pays the exchange; fee 500
     for node in (treasury, cold):
         node.add(D, 1007, [(B, 1), (C, 1)], [(a0, 78_000)])  # both wallets' coins into treasury; fee 500
@@ -75,7 +76,7 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
         "cold -> Exchange",
         "cold -> treasury",
     ]
-    cold, treasury = report["wallets"]
+    treasury, cold = report["wallets"]  # oldest first: treasury received before cold did
     assert (cold["name"], cold["opening_sat"], cold["closing_sat"]) == ("cold", 0, 0)
     assert (treasury["name"], treasury["opening_sat"], treasury["closing_sat"], treasury["closing_btc"]) == (
         "treasury",
@@ -95,10 +96,10 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
         ("d4", "transfer", -49_500, 0, "treasury"),
     ]
     assert report["totals"]["fees_sat"] == 2_000 and report["reconciliation"]["ok"] and report["node_check"] is None
-    assert "wallets: cold 0.00000000 BTC, treasury 0.00078000 BTC" in format_summary(report)
+    assert "wallets: treasury 0.00078000 BTC, cold 0.00000000 BTC" in format_summary(report)
     write_csv(report, tmp_path / "h.csv")
     blocks = csv_blocks(tmp_path / "h.csv")
-    assert list(blocks) == ["cold", "treasury"]
+    assert list(blocks) == ["treasury", "cold"]
     assert [(r["category"], r["amount"], r["balance"], r["wallet"]) for r in blocks["treasury"]] == [
         ("receive", "0.00100000", "0.00100000", "Exchange"),
         ("transfer", "-0.00071000", "0.00029000", "cold"),
@@ -109,7 +110,7 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
         ("send", "-0.00020500", "0.00049500", "Exchange"),
         ("transfer", "-0.00049500", "0.00000000", "treasury"),
     ]
-    assert (tmp_path / "h.csv").read_text().startswith("cold\ntime,txid,category,amount,balance,wallet\n")
+    assert (tmp_path / "h.csv").read_text().startswith("treasury\ntime,txid,category,amount,balance,wallet\n")
     html = render_html(report)
     assert "From → to" in html and "treasury → cold" in html and "<td>treasury</td>" in html and "Wallets of the holder" in html
     # one wallet alone is still its own view: no transfer, no wallet column
@@ -128,6 +129,8 @@ class _Switch(BitcoinCli):
 
     def call(self, method, *params):
         name = next((a.removeprefix("-rpcwallet=") for a in self.argv if a.startswith("-rpcwallet=")), None)
+        if name not in self.nodes:
+            raise RpcError("Requested wallet does not exist or is not loaded")
         return self.nodes[name].call(method, *params)
 
 
@@ -147,11 +150,11 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
     assert cli_module.main(["holder"]) == 1  # the one holder needs no naming; no proofs: ATTENTION, the ledger is written all the same
     out, err = capsys.readouterr()
     date = datetime.fromtimestamp(block_time(1010), UTC).strftime("%Y-%m-%d")
-    assert out.strip() == str(root / "company" / "statements" / date) and "wallets: cold 0.00000000 BTC, treasury 0.00078000 BTC" in err
+    assert out.strip() == str(root / "company" / "statements" / date) and "wallets: treasury 0.00078000 BTC, cold 0.00000000 BTC" in err
     directory = Path(out.strip())
     assert sorted(p.name for p in directory.iterdir()) == [f"company-{date}.csv", f"company-{date}.html", f"company-{date}.json"]
     written = json.loads((directory / f"company-{date}.json").read_text())
-    assert written["label"] == "Company AB" and [w["name"] for w in written["wallets"]] == ["cold", "treasury"]
+    assert written["label"] == "Company AB" and [w["name"] for w in written["wallets"]] == ["treasury", "cold"]
     assert written["period"]["start"]["height"] == 1000 and written["period"]["end"]["height"] == 1010 and written["period"]["to_tip"]
     blocks = csv_blocks(directory / f"company-{date}.csv")
     assert [(r["category"], r["wallet"]) for r in blocks["treasury"]] == [
@@ -170,6 +173,8 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
     assert cli_module.main(["report", "-w", "treasury", "--from-height", "1004", "--to-height", "1010", "-o", str(tmp_path / "t")]) == 1
     capsys.readouterr()
     assert "https://example.org/tx/" in (tmp_path / "t" / "treasury-1004..1010.html").read_text()
+    rows = list(csv.DictReader((tmp_path / "t" / "treasury-1004..1010.csv").open()))
+    assert [(r["category"], r["wallet"]) for r in rows] == [("mixed", "cold")]  # cold's input, named by cold's node, no [addresses] entry
     # a period, as for a wallet's statement; the holder named by its directory
     assert cli_module.main(["holder", "company", "--from-height", "1004", "--to-height", "1010"]) == 1
     out, _ = capsys.readouterr()
@@ -181,6 +186,10 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
         cli_module.main(["holder"]) == 2
         and "which holder? bip322 report holder KEY (holders here: company, jonas)" in capsys.readouterr().err
     )
+    assert cli_module.main(["holder", "company", "-o", str(tmp_path / "company")]) == 1
+    assert "asking cold which of 2 addresses are theirs" in capsys.readouterr().err
+    blocks = csv_blocks(tmp_path / "company" / f"company-{date}.csv")
+    assert [(r["category"], r["wallet"]) for r in blocks["treasury"]] == [("receive", "Exchange"), ("send", "cold"), ("mixed", "cold")]
     assert cli_module.main(["holder", "jonas", "-o", str(tmp_path / "jonas")]) == 0  # cold holds nothing at the end: nothing to cover
     written = json.loads((tmp_path / "jonas" / f"jonas-{date}.json").read_text())
     assert written["label"] == "jonas" and [w["name"] for w in written["wallets"]] == ["cold"]

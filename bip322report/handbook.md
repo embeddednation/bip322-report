@@ -106,11 +106,14 @@ but `holder`, `wallet` and their tables as comments to switch on.
 Other keys: `cli` (how to reach the node), `timeout`, `theme`, `heading`,
 `explorer`. Without `-w` and outside a wallet's directory, `wallet` in the
 file names the wallet, else the node's one loaded wallet is it.
-`[addresses]` names the other side of a movement in the statement's CSV
-(its `wallet` column): a send by the addresses it paid, a receive by the
-addresses it came from, which the node reads from the block (Bitcoin Core 25
-or later, no `txindex` needed). An address nothing names leaves the cell
-empty, to fill in by hand.
+The other side of a movement, the statement's `wallet` column, is named by
+its addresses: a send by the addresses it paid, a receive by the addresses it
+came from, which the node reads from the block (Bitcoin Core 25 or later, no
+`txindex` needed). A wallet of the tree, the holder's own or another
+holder's, names its addresses itself: its node is asked which are its, so a
+move between two wallets needs no entry anywhere. `[addresses]` names the
+rest, an exchange's say. An address nothing names leaves the cell empty, to
+fill in by hand.
 
 ### The holder's ledger
 

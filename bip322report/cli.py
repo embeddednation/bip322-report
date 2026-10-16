@@ -30,6 +30,7 @@ from bip322audit.datadir import (
     use_data_dir,
     wallet_dirs,
     wallet_of_cwd,
+    wallets,
 )
 from bip322audit.proofs import find_proofs
 from bip322audit.rpc import BitcoinCli, RpcError, btc
@@ -42,6 +43,7 @@ from .coverage import pending_snapshots, proofs_names
 from .fiat import Rates
 from .history import History, fetch_history
 from .holder import merge_histories
+from .names import counterparts, name_by_wallets
 from .period import Period, block, last_block_before, parse_when, period_between, period_for_heights, period_for_year
 from .render import HEADINGS, PACKAGE_FONTS, THEMES, render_html, write_csv, write_pdf
 from .report import build_report, format_summary
@@ -80,6 +82,13 @@ def _setting(args, config: Config, name: str, key: str, wallet: str | None, defa
     """An option's value: the command line, else bip322.toml (the wallet's table, its holder's, then the top level), else ``default``."""
     given = getattr(args, name, None)
     return given if given is not None else config.get(key, wallet, default, holder=holder)
+
+
+def _names(args, config: Config, history: History, period: Period, own: list[str]) -> dict[str, str]:
+    """The other side of the period's movements named: ``[addresses]``, else the wallet of the tree whose node says the address is
+    its own; ``own`` are the statement's wallets, whose addresses need no name."""
+    others = {w: _cli(args, config, w) for w in wallets() if w not in own}
+    return name_by_wallets(counterparts(history.between(period.start.height, period.end.height)), config.addresses, others, _progress)
 
 
 def _add_node_args(p: argparse.ArgumentParser) -> None:
@@ -336,6 +345,7 @@ def cmd_report(args) -> int:
     if roots is None:
         roots = _proofs_roots(args, wallet)
     period = _period(args, cli, history, period_label)
+    names = _names(args, config, history, period, [wallet])
     report = build_report(
         history,
         period,
@@ -347,7 +357,7 @@ def cmd_report(args) -> int:
         engines=_engines(args),
         progress=_progress,
         dust_sat=dust,
-        addresses=config.addresses,
+        addresses=names,
     )
     return _write_statement(args, config, wallet, report, directory, _file_stem(wallet, period_label), roots, history.chain, theme, pdf)
 
@@ -425,6 +435,7 @@ def cmd_holder(args) -> int:
     history = merge_histories(histories)
     cli = _cli(args, config, members[0])  # any one node for the chain-level work: re-verifying the proofs, the UTXO lookups
     period = _period(args, cli, history, period_label) if period_label else _whole_life(cli, history)
+    names = _names(args, config, history, period, members)
     directory = Path(args.output) if args.output else holder_statements_dir(key) / period.label
     _check_directory(directory, args.force)
     report = build_report(
@@ -437,7 +448,7 @@ def cmd_holder(args) -> int:
         engines=_engines(args),
         progress=_progress,
         dust_sat=dust,
-        addresses=config.addresses,
+        addresses=names,
         wallets=members,
         node_check=False,
     )
