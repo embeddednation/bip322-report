@@ -128,7 +128,7 @@
   <div class="result">{% if not r.ok %}<span class="pill bad">ATTENTION</span>{% endif %}</div>
 </div>
 <p class="period">{% if r.holder %}{{ r.holder }} · {% endif %}<span class="when">{{ r.period.start.time_utc | utc }}</span> – <span class="when">{{ r.period.end.time_utc | utc }}</span>{% if r.chain != "main" %} · {{ r.chain }} chain{% endif %}</p>
-{% if r.wallets %}<p class="small muted">Wallets of the holder, with their closing balances: {% for w in r.wallets %}{{ w.name }} {{ w.closing_btc }}{% if not loop.last %} · {% endif %}{% endfor %}. A transfer between them is one movement, its fee the holder's only cost.</p>{% endif %}
+{% if r.wallets %}<p class="small muted">Wallets of the holder, with their closing balances: {% for w in r.wallets %}{{ w.name }} {{ w.closing_btc }}{% if w.history and w.history.source == "file" %} (history kept {{ w.history.fetched_utc[:10] }}){% endif %}{% if not loop.last %} · {% endif %}{% endfor %}. A transfer between them is one movement, its fee the holder's only cost.</p>{% endif %}
 
 {% if not r.ok %}
 <h2 class="attention">Attention</h2>

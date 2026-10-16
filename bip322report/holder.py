@@ -20,15 +20,18 @@ def merge_histories(histories: dict[str, History]) -> History:
     """One history over the wallets, each coin tagged with its wallet, every transaction once.
 
     The tip is the lowest of the histories' tips, so a block that arrived
-    between two reads is in none of it.  Pending transactions merge the same
-    way, by txid.
+    between two reads is in none of it; a history whose wallet held nothing at
+    its tip does not count, since nothing can have left that wallet after it
+    (a history kept on file for a wallet the node has not loaded is one).
+    Pending transactions merge the same way, by txid.
     """
     if not histories:
         raise ValueError("no wallets to merge")
     chains = {h.chain for h in histories.values()}
     if len(chains) > 1:
         raise ValueError(f"the wallets are on different chains: {', '.join(sorted(chains))}")
-    tip = min(histories.values(), key=lambda h: h.tip_height)
+    holding = [h for h in histories.values() if h.balance_at(h.tip_height)] or list(histories.values())
+    tip = min(holding, key=lambda h: h.tip_height)
     parts: dict[str, dict] = {}
     for name, history in histories.items():
         for tx in history.txs + history.pending:

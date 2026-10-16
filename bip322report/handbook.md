@@ -61,6 +61,7 @@ does, and the wallet names the rest:
         2026/
           treasury-2026.pdf  treasury-2026.json  treasury-2026.csv
           treasury-2026-10-09-920114-proofs.json
+      history.json                        # the history last read from the node
     cold/
       snapshots/
     statements/                           # the holder's ledgers over its wallets
@@ -142,6 +143,15 @@ between two of the holder's wallets is a send in one block and a receive in
 the other, as in each wallet's own statement. The proofs
 come from every wallet's `snapshots/`, so each coin held is also one the
 holder has proven control of.
+
+Every history read from the node is kept in the wallet's directory as
+`history.json`. A wallet the node has not loaded any more, an old one that
+was emptied into the next, is read from that file: one statement or ledger
+made while it was loaded is enough. The file serves only if the wallet held
+nothing at the file's tip, since nothing can have left it after that; a
+wallet that still held coins has to be loaded. The summary and the ledger's
+JSON say which wallets came from a file. A deposit into an unloaded wallet is
+not seen until it is loaded again.
 
 ## Install
 

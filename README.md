@@ -96,7 +96,10 @@ the wallet's own table and the top level. `bip322 report
 holder KEY` merges its wallets' histories into one ledger, a transfer between
 two of them one movement of kind `transfer`, the balance the holder's total,
 under `KEY/statements/<label>/`; its CSV is one block per wallet, under the
-wallet's name, as that wallet sees the movements.
+wallet's name, as that wallet sees the movements. Every history read is kept
+in the wallet's directory as `history.json`, and a wallet the node has not
+loaded any more is read from that file, provided it held nothing at the
+file's tip.
 
 `bip322 report` prints a summary on stderr and the directory on stdout. For the
 year, made in January from the year-end snapshot:

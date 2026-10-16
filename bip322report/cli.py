@@ -28,12 +28,14 @@ from bip322audit.datadir import (
     snapshots_dir,
     statements_dir,
     use_data_dir,
+    wallet_dir,
     wallet_dirs,
     wallet_of_cwd,
     wallets,
 )
 from bip322audit.proofs import find_proofs
 from bip322audit.rpc import BitcoinCli, RpcError, btc
+from bip322audit.snapshot import write_text_atomic
 from bip322core._version import SPEC
 from bip322core.cli import CLIError, add_help_command, emit
 from bip322core.core import BIP322Error
@@ -70,10 +72,10 @@ def _wallet_name(args, config: Config) -> str | None:
     return str(named) if named is not None else None
 
 
-def _cli(args, config: Config, wallet: str | None) -> BitcoinCli:
-    """The node as the options and bip322.toml describe it, on the wallet's node wallet when one is named."""
+def _cli(args, config: Config, wallet: str | None, *, rpcwallet: bool = True) -> BitcoinCli:
+    """The node as the options and bip322.toml describe it, on the wallet's node wallet when one is named (and ``rpcwallet``)."""
     cli = BitcoinCli(_opt(args, "cli") or config.get("cli", wallet) or "bitcoin-cli")
-    if wallet is not None:
+    if wallet is not None and rpcwallet:
         cli.argv.append(f"-rpcwallet={config.node_wallet(wallet)}")
     return cli
 
@@ -106,6 +108,51 @@ def _history(args, cli: BitcoinCli) -> History:
     if getattr(args, "history", None):
         return History.load(Path(args.history))
     return fetch_history(cli, progress=_progress)
+
+
+HISTORY_FILE = "history.json"  # in a wallet's directory: the history last read from the node, for when the wallet is not loaded
+
+
+def _saved_history(wallet: str) -> Path | None:
+    """The wallet's ``history.json`` in the tree, when the wallet is a wallet of the tree."""
+    with contextlib.suppress(ConfigError):
+        path = wallet_dirs().get(wallet)
+        if path is not None:
+            return path / HISTORY_FILE
+    return None
+
+
+def _save_history(wallet: str, history: History, *, member_only: bool) -> None:
+    """Keep the history read from the node in the wallet's directory; with ``member_only``, only when the directory is there already."""
+    with contextlib.suppress(ConfigError):
+        if not member_only or wallet in wallet_dirs():
+            directory = wallet_dir(wallet)
+            directory.mkdir(parents=True, exist_ok=True)
+            write_text_atomic(directory / HISTORY_FILE, json.dumps(history.to_dict(), indent=2) + "\n")
+
+
+def _wallet_history(args, config: Config, wallet: str | None, cli: BitcoinCli) -> tuple[History, dict]:
+    """The wallet's history from the node, checked against the chain; or, when the node says the wallet is not loaded, from the
+    ``history.json`` in its directory, provided the wallet held nothing at that history's tip (nothing can have left it since).
+    Returns the history and where it came from: ``source`` node or file, with the tip and the time it was read."""
+    try:
+        history = fetch_history(cli, progress=_progress)
+    except RpcError as exc:
+        path = _saved_history(wallet) if wallet is not None and "not loaded" in str(exc) else None
+        if path is None or not path.is_file():
+            raise
+        history = History.load(path)
+        held = history.balance_at(history.tip_height)
+        if held:
+            raise CLIError(
+                f"{wallet} is not loaded on the node, and {path} ends at block {history.tip_height} with {btc(held)} BTC held: "
+                "load the wallet, it may have spent since"
+            ) from exc
+        _check_history(_cli(args, config, wallet, rpcwallet=False), history, str(path))
+        _progress(f"{wallet}: not loaded; from {path.name} saved {history.fetched_utc} at block {history.tip_height}, holding nothing")
+        return history, {"source": "file", "tip_height": history.tip_height, "fetched_utc": history.fetched_utc}
+    _check_history(cli, history, f"{wallet}'s history" if wallet else "the history")
+    return history, {"source": "node", "tip_height": history.tip_height, "fetched_utc": history.fetched_utc}
 
 
 def _check_history(cli: BitcoinCli, history: History, source: str) -> None:
@@ -213,7 +260,12 @@ def cmd_block(args) -> int:
 
 def cmd_history(args) -> int:
     config = Config.load()
-    history = fetch_history(_cli(args, config, _wallet_name(args, config)), progress=_progress)
+    wallet = _wallet_name(args, config)
+    history = fetch_history(_cli(args, config, wallet), progress=_progress)
+    if wallet is None and history.wallet is not None:
+        wallet = config.wallet_of_node(str(history.wallet))
+    if wallet is not None:
+        _save_history(wallet, history, member_only=True)  # a wallet of the tree keeps it, for when it is not loaded any more
     emit(json.dumps(history.to_dict(), indent=2), args.output)
     print(
         json.dumps(
@@ -289,15 +341,23 @@ def _report_history(args, cli: BitcoinCli, config: Config, wallet: str | None, p
         with contextlib.suppress(RpcError, KeyError, TypeError, ConfigError):  # no wallet: fetch_history says so better
             early = wallet or config.wallet_of_node(str(cli.call("getwalletinfo")["walletname"]))
             _check_directory(statements_dir(early) / period_label, args.force)
-    history = _history(args, cli)
+    if args.history:
+        history, source = History.load(Path(args.history)), None
+    else:
+        history, source = _wallet_history(args, config, wallet, cli)
     if wallet is None and history.wallet is not None:
         wallet = config.wallet_of_node(str(history.wallet))
     if wallet is None:
         raise CLIError("no wallet name for the statement: -w NAME (or wallet = NAME in bip322.toml)")
     directory = Path(args.output) if args.output else statements_dir(wallet) / period_label
     _check_directory(directory, args.force)
-    _check_history(cli, history, args.history or "the history")
-    if history.wallet and not any(a.startswith("-rpcwallet=") for a in cli.argv):
+    if args.history:
+        _check_history(cli, history, args.history)
+    elif source["source"] == "node":
+        _save_history(wallet, history, member_only=bool(args.output))  # a statement in the tree makes the wallet a wallet of it
+    else:
+        cli.argv[:] = [a for a in cli.argv if not a.startswith("-rpcwallet=")]  # the wallet is not loaded: the node alone from here
+    if history.wallet and not any(a.startswith("-rpcwallet=") for a in cli.argv) and (args.history or source["source"] == "node"):
         cli.argv.append(f"-rpcwallet={history.wallet}")  # a cached history knows its wallet; the node cross-check needs it
     return history, wallet, directory
 
@@ -358,6 +418,7 @@ def cmd_report(args) -> int:
         progress=_progress,
         dust_sat=dust,
         addresses=names,
+        node_check=any(a.startswith("-rpcwallet=") for a in cli.argv),  # not for a wallet the node has not loaded
     )
     return _write_statement(args, config, wallet, report, directory, _file_stem(wallet, period_label), roots, history.chain, theme, pdf)
 
@@ -427,13 +488,15 @@ def cmd_holder(args) -> int:
         _check_directory(Path(args.output), args.force)
 
     histories: dict[str, History] = {}
+    sources: dict[str, dict] = {}
     for w in members:
-        cli = _cli(args, config, w)
         _progress(f"{w}: reading the history")
-        histories[w] = fetch_history(cli, progress=_progress)
-        _check_history(cli, histories[w], f"{w}'s history")
+        histories[w], sources[w] = _wallet_history(args, config, w, _cli(args, config, w))
+        if sources[w]["source"] == "node":
+            _save_history(w, histories[w], member_only=True)
     history = merge_histories(histories)
-    cli = _cli(args, config, members[0])  # any one node for the chain-level work: re-verifying the proofs, the UTXO lookups
+    loaded = [w for w in members if sources[w]["source"] == "node"]  # any one node for the chain-level work: the proofs, the UTXO lookups
+    cli = _cli(args, config, loaded[0]) if loaded else _cli(args, config, members[0], rpcwallet=False)
     period = _period(args, cli, history, period_label) if period_label else _whole_life(cli, history)
     names = _names(args, config, history, period, members)
     directory = Path(args.output) if args.output else holder_statements_dir(key) / period.label
@@ -450,6 +513,7 @@ def cmd_holder(args) -> int:
         dust_sat=dust,
         addresses=names,
         wallets=members,
+        sources=sources,
         node_check=False,
     )
     return _write_statement(args, config, None, report, directory, f"{slug}-{period.label}", roots, history.chain, theme, pdf, holder=key)

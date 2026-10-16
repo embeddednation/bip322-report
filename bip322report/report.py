@@ -42,6 +42,7 @@ def build_report(
     dust_sat: int = 0,
     addresses: dict[str, str] | None = None,
     wallets: Sequence[str] | None = None,
+    sources: dict[str, dict] | None = None,
     node_check: bool = True,
 ) -> dict:
     """The report as a plain dict (what report.json holds and the templates render).
@@ -51,7 +52,9 @@ def build_report(
     ``wallets`` names a holder's wallets when ``history`` is their merged one
     (``holder.merge_histories``): the counterpart then shows both sides, and
     the report carries each wallet's opening and closing balance and the
-    movements as that wallet sees them under ``wallets``, oldest wallet first.  ``node_check`` False leaves out the listunspent cross-check,
+    movements as that wallet sees them under ``wallets``, oldest wallet first,
+    with where its history came from when ``sources`` says (node, or the file
+    kept for a wallet the node has not loaded).  ``node_check`` False leaves out the listunspent cross-check,
     which is per node wallet.
 
     ``cli`` is needed to re-verify the proofs files under ``proofs_roots`` against the chain and to
@@ -135,7 +138,10 @@ def build_report(
         "node_check": _node_check(cli, history, period, closing, dust) if cli is not None and node_check else None,
     }
     report["wallets"] = (
-        [_wallet_block(w, opening, closing, movements, rates, addresses or {}) for w in _wallet_order(history, wallets)]
+        [
+            _wallet_block(w, opening, closing, movements, rates, addresses or {}, (sources or {}).get(w))
+            for w in _wallet_order(history, wallets)
+        ]
         if wallets is not None
         else None
     )
@@ -211,13 +217,27 @@ def _wallet_order(history: History, wallets: Sequence[str]) -> list[str]:
 
 
 def _wallet_block(
-    wallet: str, opening: list[Coin], closing: list[Coin], movements: list[WalletTx], rates: Rates | None, names: dict[str, str]
+    wallet: str,
+    opening: list[Coin],
+    closing: list[Coin],
+    movements: list[WalletTx],
+    rates: Rates | None,
+    names: dict[str, str],
+    source: dict | None,
 ) -> dict:
-    """One wallet of a holder: its opening and closing balance, and the period's movements as it sees them."""
+    """One wallet of a holder: its opening and closing balance, the period's movements as it sees them, its history's source."""
     o = sum(c.amount_sat for c in opening if c.wallet == wallet)
     s = sum(c.amount_sat for c in closing if c.wallet == wallet)
     rows = _wallet_rows(movements, wallet, o, rates, names)
-    return {"name": wallet, "opening_sat": o, "opening_btc": btc(o), "closing_sat": s, "closing_btc": btc(s), "transactions": rows}
+    return {
+        "name": wallet,
+        "opening_sat": o,
+        "opening_btc": btc(o),
+        "closing_sat": s,
+        "closing_btc": btc(s),
+        "transactions": rows,
+        "history": source,
+    }
 
 
 def _wallet_rows(movements: list[WalletTx], wallet: str, opening_sat: int, rates: Rates | None, names: dict[str, str]) -> list[dict]:

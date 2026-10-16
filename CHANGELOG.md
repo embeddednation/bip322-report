@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.20.0 (2026-10-16)
+
+Old wallets need not stay loaded. Every history read from the node is kept
+in the wallet's directory as `history.json` (by `report`, `holder` and
+`history`). When the node says a wallet is not loaded, its statement and the
+holder's ledger read that file instead, provided the wallet held nothing at
+the file's tip; one that still held coins has to be loaded. The ledger's
+merged history no longer stops at an emptied wallet's tip. The summary, the
+JSON (`wallets[].history`) and the statement say which wallets came from a
+file.
+
 ## 0.19.0 (2026-10-16)
 
 In the holder's CSV a move between two of the holder's wallets is a `send`

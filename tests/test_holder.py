@@ -118,26 +118,33 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
     assert alone["wallets"] is None and "From → to" not in render_html(alone)
     with pytest.raises(ValueError, match="different chains"):
         merge_histories({"a": histories["treasury"], "b": History("test", None, 1, "00", "", [], [])})
+    emptied = History(merged.chain, None, 900, "00" * 32, "2020-01-01T00:00:00Z", [], [])  # kept on file: its old tip does not cut
+    assert merge_histories({**histories, "old": emptied}).tip_height == 1010
+    assert merge_histories({"old": emptied, "older": History(merged.chain, None, 800, "11" * 32, "", [], [])}).tip_height == 800
 
 
 class _Switch(BitcoinCli):
     """The node the CLI builds: -rpcwallet=NAME in its argv picks the fake node wallet to answer."""
 
-    def __init__(self, nodes: dict[str, FakeNode]):
+    def __init__(self, nodes: dict[str, FakeNode], chain: FakeNode | None = None):
         super().__init__(["bitcoin-cli"])
         self.nodes = nodes
+        self.node = chain  # answers the node-level calls when no wallet is named (any node would)
 
     def call(self, method, *params):
         name = next((a.removeprefix("-rpcwallet=") for a in self.argv if a.startswith("-rpcwallet=")), None)
+        if name is None:  # no wallet named: the node itself answers
+            return (self.node or next(iter(self.nodes.values()))).call(method, *params)
         if name not in self.nodes:
-            raise RpcError("Requested wallet does not exist or is not loaded")
+            raise RpcError(f"{method}: error code: -18 error message: Requested wallet does not exist or is not loaded")
         return self.nodes[name].call(method, *params)
 
 
 def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
     """bip322 report holder: the holder is a directory, its wallets the directories under it, the ledger to date in its statements/."""
     nodes, _ = _two_wallets(wallet)
-    monkeypatch.setattr(cli_module, "BitcoinCli", lambda command: _Switch(nodes))
+    chain = nodes["treasury"]  # the node itself, for the calls that name no wallet, whichever wallets are loaded
+    monkeypatch.setattr(cli_module, "BitcoinCli", lambda command: _Switch(nodes, chain))
     monkeypatch.setattr(cli_module, "_pdf_possible", lambda: False)
     root = Path(os.environ["BIP322_DIR"])
     for name in ("treasury", "cold"):
@@ -168,6 +175,27 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
         ("send", "treasury"),
     ]
     assert blocks["treasury"][-1]["balance"] == "0.00078000" and blocks["cold"][-1]["balance"] == "0.00000000"
+    assert [w["history"]["source"] for w in written["wallets"]] == ["node", "node"]
+    # the histories read are kept in the wallets' directories, for when a wallet is not loaded any more
+    assert (root / "company" / "treasury" / "history.json").is_file() and (root / "company" / "cold" / "history.json").is_file()
+    cold_node, treasury_node = nodes.pop("cold"), nodes["treasury"]  # cold unloaded: its kept history serves, it held nothing at its tip
+    treasury_node.tip_height = 1012  # and the ledger runs to treasury's tip, not cut to cold's kept one
+    date2 = datetime.fromtimestamp(block_time(1012), UTC).strftime("%Y-%m-%d")
+    assert cli_module.main(["holder", "-o", str(tmp_path / "kept")]) == 1
+    err = capsys.readouterr().err
+    assert "cold: not loaded; from history.json saved " in err and "at block 1010, holding nothing" in err
+    written = json.loads((tmp_path / "kept" / f"company-{date2}.json").read_text())
+    assert written["period"]["end"]["height"] == 1012 and [w["history"]["source"] for w in written["wallets"]] == ["node", "file"]
+    assert [w["history"]["tip_height"] for w in written["wallets"]] == [1012, 1010]
+    assert csv_blocks(tmp_path / "kept" / f"company-{date2}.csv") == blocks
+    assert "(history kept " in (tmp_path / "kept" / f"company-{date2}.html").read_text()
+    assert cli_module.main(["report", "-w", "cold", "--from-height", "1004", "--to-height", "1010", "-o", str(tmp_path / "c")]) == 0
+    assert "cold: not loaded; from history.json" in capsys.readouterr().err  # a wallet's own statement, the same way
+    nodes.pop("treasury")  # treasury unloaded too: it held coins at its kept tip, so a spend since would be missed
+    assert cli_module.main(["holder", "-o", str(tmp_path / "refused")]) == 2
+    assert "treasury is not loaded on the node, and " in capsys.readouterr().err and not (tmp_path / "refused").exists()
+    nodes.update(treasury=treasury_node, cold=cold_node)
+    treasury_node.tip_height = 1010
     assert "https://example.org/tx/" in (directory / f"company-{date}.html").read_text()  # explorer from [holders.company]
     # a wallet's statement takes its holder's settings too
     assert cli_module.main(["report", "-w", "treasury", "--from-height", "1004", "--to-height", "1010", "-o", str(tmp_path / "t")]) == 1
