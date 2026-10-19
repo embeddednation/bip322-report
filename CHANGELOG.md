@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.22.0 (2026-10-19)
+
+The statement for the auditor, laid out like the reader's history. A summary
+first: the opening holdings, received, sent, fees, the closing holdings, in
+BTC and in the currency when rates are given (the holdings at the rate of
+their day), the statement in the tree that closed at this one's opening block
+cited by label and reference, and, for a holder, a table of its wallets
+(opening, received, sent, transfers between them, fees, closing); then one
+sentence saying what is proven, or the ATTENTION checklist. The movements are
+numbered and carry the kind in words, the wallet (a holder's ledger) and the
+counterparty instead of the transaction identifier; section 4 lists the
+transactions by number. The holdings are one row per address, grouped by
+wallet, with the proof's verdict, and section 3 is one page per address
+(the proof once, a lookup per UTXO) instead of one per UTXO. The explainer is
+section 5. In the JSON: `wallets[].received_sat`, `sent_sat`,
+`transfers_sat`, `fees_sat`, `mixed_sat` and `wallets_totals`, `previous`,
+`fiat.opening` and `fiat.closing`, `totals.fiat`, and a holder's movements
+carry `wallet` with a plain `counterpart` instead of `from -> to`.
+
 ## 0.21.0 (2026-10-16)
 
 A document for the reader who is not the auditor: beside every statement,

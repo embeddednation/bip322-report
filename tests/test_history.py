@@ -154,9 +154,12 @@ def test_a_transaction_funded_with_others_is_mixed_and_its_fee_unknown(tmp_path,
     assert (totals["received_sat"], totals["sent_sat"], totals["mixed_sat"], totals["mixed_count"]) == (0, 30_000, 50_000, 1)
     assert (totals["amount_sat"], totals["amount_btc"], totals["fees_sat"]) == (20_000, "0.00020000", 1_000)
     html = render_html(report)
-    assert '<td>mixed</td><td class="num">0.00050000</td><td class="num"><span class="muted">unknown</span></td>' in html
+    assert (
+        '<td>Joint transaction</td><td></td><td class="num">0.00050000</td><td class="num"><span class="muted">unknown</span></td>' in html
+    )
     assert 'the holdings of section 2</td><td class="num">0.00020000</td><td class="num">(0.00001000)</td>' in html  # the sum of the rows
-    assert "mixed 0.00050000, fee unknown" in html and "its fee is unknown" in html
+    assert "Joint transactions, the wallet's net</td>" in html and "1, funded by others too: their fees unknown" in html
+    assert "its fee is unknown" in html and html.count("fees unknown") == 1
     write_csv(report, tmp_path / "x.csv")  # the CSV's amount is the net, fee inside, so the balance is its running sum
     rows = list(csv.DictReader((tmp_path / "x.csv").open()))
     assert [(r["category"], r["amount"], r["balance"]) for r in rows] == [
@@ -177,7 +180,7 @@ def test_a_transaction_funded_with_others_is_mixed_and_its_fee_unknown(tmp_path,
     report = _report(node)
     assert _rows(report) == [("b2", "mixed", -70_000, None, 30_000), ("c3", "internal", 0, 1_000, 29_000)] and _exact(report)
     assert (report["totals"]["sent_sat"], report["totals"]["mixed_sat"], report["totals"]["fees_sat"]) == (0, -70_000, 1_000)
-    assert "mixed (0.00070000), fee unknown" in render_html(report)
+    assert "Joint transactions, the wallet's net</td><td class=\"num\">(0.00070000)</td>" in render_html(report)
     assert "mixed" not in render_html(_report(node, 1004, 1010))  # exceptions only
 
 
@@ -193,7 +196,7 @@ def test_a_payment_to_an_output_without_an_address_is_a_send(tmp_path, wallet):
     report = _report(node)
     assert _rows(report) == [("b2", "send", -40_000, 1_000, 59_000), ("c3", "internal", 0, 500, 58_500)] and _exact(report)
     assert report["totals"]["sent_sat"] == 40_000 and report["transactions"][0]["others_out"][0]["address"] is None
-    assert "paid out 0.00040000" in render_html(report)
+    assert 'Sent</td><td class="num">(0.00040000)</td>' in render_html(report)
     write_csv(report, tmp_path / "x.csv")
     assert next(csv.DictReader((tmp_path / "x.csv").open()))["wallet"] == ""  # a bare script belongs to no named wallet
 

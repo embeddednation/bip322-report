@@ -96,8 +96,9 @@ key there (`dust`, `theme`, …) is a default for the holder's wallets, between
 the wallet's own table and the top level. `bip322 report
 holder KEY` merges its wallets' histories into one ledger, a transfer between
 two of them one movement of kind `transfer`, the balance the holder's total,
-under `KEY/statements/<label>/`; its CSV is one block per wallet, under the
-wallet's name, as that wallet sees the movements. Every history read is kept
+each wallet's opening, received, sent, transfers, fees and closing in a table
+on the first page, under `KEY/statements/<label>/`; its CSV is one block per
+wallet, under the wallet's name, as that wallet sees the movements. Every history read is kept
 in the wallet's directory as `history.json`, and a wallet the node has not
 loaded any more is read from that file, provided it held nothing at the
 file's tip.
@@ -180,17 +181,34 @@ balance in the movements table, a reference number on every page, and a
 section on the basis of preparation and its limitations (point in time,
 control is not title, completeness rests on the holder's representation).
 The wallet is named by the node wallet's name; `--holder NAME` puts the holder's name in the header. Sections 1 and 2 are kept whole when they fit on a page.
+A holder's ledger and a wallet's statement are the same document; the ledger
+has a table of the holder's wallets and names the wallet in each movement.
 
 * Period: the instants asked for and the two blocks they resolved to.
-* First, in the style of a bank statement, the movements: opening balance,
-  each transaction with its running balance, closing balance, which is the
-  holdings on the chain; a difference from the running balance is printed
-  in red, agreement in one quiet sentence.
-* Holdings at the end of the period: the wallet's UTXOs with the
-  scriptPubKey each is locked to, then one page per UTXO in two steps, each
+* First, the summary: the opening holdings, what was received from others,
+  sent to others and paid in fees, and the closing holdings, in BTC and, when
+  rates are given, in the currency, the two holdings at the rate of their
+  day. The opening line cites the statement in the tree that closed at this
+  one's opening block, by label and reference, in red when its closing
+  holdings are not these opening ones. For a holder, a table of its wallets
+  follows: each one's opening, received, sent, transfers between the
+  holder's wallets (in less out; they cancel in the total), fees and closing.
+  Then one sentence saying what is proven, or, when a check failed, an
+  ATTENTION checklist.
+* The movements, in the style of a bank statement: each transaction numbered,
+  with its date, its kind in words (Received, Sent, Internal move, Transfer,
+  Joint transaction, Dust swept), the wallet (a holder's ledger), the
+  counterparty, the amount, the fee and the running balance; opening and
+  closing rows. No transaction identifiers here: the number finds the
+  transaction in section 4.
+* Holdings at the end of the period: one row per address (a holder's grouped
+  by wallet) with when its coins arrived, how many UTXOs it holds, the
+  amount, the proof's verdict and block, and the page of section 3 that
+  shows it. Then one page per address in two steps, each
   a pasteable command with what it printed. *Proof of control of the scriptPubKey*: message, proof, and
-  `bip322 verifymessage <scriptPubKey> ...` with its verdict. *On the
-  chain*: `bip322 audit holdings TXID:VOUT --at <block of the proof>`, the
+  `bip322 verifymessage <scriptPubKey> ...` with its verdict, once for the
+  address. *On the
+  chain*, for each UTXO at it: `bip322 audit holdings TXID:VOUT --at <block of the proof>`, the
   block named in the proof's message, which reports the same scriptPubKey as
   the UTXO's lock, the amount, and that it was held at that block (confirmed
   by then and unspent now). Control and holding are thus shown at one block.
@@ -247,7 +265,9 @@ The wallet is named by the node wallet's name; `--holder NAME` puts the holder's
   an unconfirmed transaction spends, or a coinbase output not yet mature,
   is missing from `listunspent` but still in the chain (`gettxout`): it is
   noted, not a mismatch.
-* At the end, on a page of its own, section 4: how a BIP-322 proof of
+* Section 4, the transactions: each movement's number with the
+  transaction's identifier and block, linked to the explorer on mainnet.
+* At the end, on a page of its own, section 5: how a BIP-322 proof of
   control works, for any kind of scriptPubKey, with a figure of the two
   virtual transactions field by field: the message hashed into to_spend's
   input, to_spend's txid consumed by to_sign's input, the proof as its
@@ -256,7 +276,7 @@ The wallet is named by the node wallet's name; `--holder NAME` puts the holder's
   example, and what a proof shows and does not; then
   brief notes: units, wallet and blocks, preparation, the files alongside
   and the tools that check them.
-* Every movement: date, txid, kind, amount (received, or sent before the
+* Every movement: date, kind, counterparty, amount (received, or sent before the
   fee), fee and the running balance; the total row's amount is the sum of
   the rows. Kinds: `receive` (nothing of the wallet's spent), `send`,
   `internal` (everything came back), and `mixed` for a transaction funded

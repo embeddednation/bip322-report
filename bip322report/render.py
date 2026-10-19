@@ -241,11 +241,25 @@ def _env() -> Environment:
         lstrip_blocks=True,
     )
     env.filters["btc"] = btc
-    env.filters["acct"] = lambda text: f"({text[1:]})" if str(text).startswith("-") else str(text)  # accounting negatives
+    env.filters["acct"] = _acct
+    env.filters["paren"] = lambda text: "–" if _nil(text) else f"({text})"  # a sum that is subtracted: in parentheses, a dash for nothing
+    env.filters["nil"] = lambda text: "–" if _nil(text) else str(text)  # a dash for nothing, in a table of sums
     env.filters["breakable"] = _breakable
     env.filters["hl"] = _highlight
     env.filters["utc"] = lambda iso: (str(iso).replace("T", " ").replace("Z", " UTC")) if iso else ""
     return env
+
+
+def _acct(text) -> str:
+    """Accounting negatives: ``-1.5`` as ``(1.5)``; nothing for None."""
+    if text is None:
+        return ""
+    return f"({text[1:]})" if str(text).startswith("-") else str(text)
+
+
+def _nil(text) -> bool:
+    """Whether a figure is nothing: None, "", or zeros however written."""
+    return text is None or not str(text).strip("()-") or set(str(text)) <= set("0.()-")
 
 
 def _breakable(text: str, every: int = 12) -> Markup:
@@ -344,8 +358,47 @@ def render_html(
     return (
         _env()
         .get_template("report.html")
-        .render(r=report, explorer=(explorer or "").rstrip("/") or None, t=t, faces=faces, fig=fig, doc=STATEMENT)
+        .render(
+            r=report,
+            explorer=(explorer or "").rstrip("/") or None,
+            t=t,
+            faces=faces,
+            fig=fig,
+            doc=STATEMENT,
+            kinds=KINDS,
+            proven=_proven(report),
+        )
     )
+
+
+def _proven(report: dict) -> str:
+    """The one sentence under the summary when every check passed: what is proven, and what the chain and the node said.
+
+    Exceptions only: when a check failed, the ATTENTION checklist says which, and this sentence is not shown.
+    """
+    closing, cov = report["closing"], report["coverage"]
+    if not closing["coins"]:
+        if report["dust"]["count"]:
+            return "Nothing but dust at the end of the period (see the notes): nothing to prove."
+        return "No holdings at the end of the period: nothing to prove."
+    n, m = cov["total_count"], cov["addresses_total"]
+    utxos = "The closing UTXO" if n == 1 else f"All {n} closing UTXOs"
+    where = f"at {'its' if n == 1 else 'their'} address" if m == 1 else f"in {m} addresses"
+    text = f"{utxos}, {where}, {'has' if n == 1 else 'have'} a valid proof of control (section 3)"
+    chain = report.get("onchain")
+    if chain and not chain.get("not_run"):
+        text += f", and {'it is' if n == 1 else 'each is'} on the chain at the block of {'its' if n == 1 else 'their'} proof"
+        asides = []
+        if chain.get("after_proof"):
+            asides.append(f"{chain['after_proof']} received after that block, so covered by a later proof")
+        if chain.get("spent_since"):
+            asides.append(f"{chain['spent_since']} spent since the period")
+        if asides:
+            text += " (" + "; ".join(asides) + ")"
+    node = report.get("node_check")
+    if node and node.get("ok"):
+        text += "; the node wallet agrees"
+    return text + "."
 
 
 def render_history_html(report: dict, *, theme: str = "journal", heading: str | None = None, fonts_url: str | None = None) -> str:

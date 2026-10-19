@@ -79,6 +79,14 @@
   .kv td:first-child { width: 30%; color: var(--muted); }
   .checks td:first-child { width: 4%; font-weight: 700; text-align: center; }
 
+  /* the summary: the holdings from opening to closing, then the holder's wallets */
+  table.summary { margin-bottom: 6px; }
+  table.summary td.sub { padding-left: 20px; }
+  table.summary tbody tr td { background: var(--bg); }
+  table.wallets { margin-top: 10px; }
+  p.proven { font-family: var(--font-label); margin: 10px 0 16px; }
+  tr.group td { background: var(--bg) !important; font-weight: 600; color: var(--strong); padding-top: 8px; border-bottom: 1px solid var(--rule-strong); }
+
   /* a UTXO's page: tables of a name and its value, without stripes */
   table.coins tbody { break-inside: avoid; }
   table.coins tbody tr td { background: var(--bg); border-bottom: 0; }
@@ -101,7 +109,7 @@
   .hl-ok { color: var(--c-good); font-weight: 700; } .hl-bad { color: var(--c-bad); font-weight: 700; }
   .hl-hash { color: {{ t.hash }}; } .hl-txid { color: {{ t.txid }}; }
 
-  /* the figure of section 4 */
+  /* the figure of section 5 */
   svg.fig { width: 100%; height: auto; margin: 6px 0 2px; }
   .caption { font-size: 8pt; color: var(--muted); margin: 0 0 10px; }
 </style>

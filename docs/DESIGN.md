@@ -121,7 +121,7 @@ subdirectory.
 * No descriptor, xpub or derivation path anywhere in the output: the report
   names addresses and outputs, like the proofs files do.
 * Nothing about the rest of the wallet's snapshots: only the proofs files
-  cited on a closing UTXO's page are named and copied next to the statement;
+  cited on a closing address's page are named and copied next to the statement;
   the others are a bare count.
 * No links to a third party except on mainnet, where transactions and
   scripts link to a block explorer unless `--explorer ''` says otherwise.
@@ -137,5 +137,5 @@ the wallet's snapshots. What it hands to a reader, the report and the proofs
 files, is checkable on any node with the chain and no wallet: `bip322 audit
 verify` for the proofs files, `gettxout` and the transactions by txid for the balances and
 movements. The statement's notes name the files that come with it and the
-command that checks a proofs file; the commands on the UTXO pages paste as
+command that checks a proofs file; the commands on the address pages paste as
 they stand.

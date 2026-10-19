@@ -70,14 +70,30 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
     report = build_report(
         merged, period_for_heights(nodes["cold"], 1000, 1010), label="Company AB", cli=None, addresses=names, wallets=["cold", "treasury"]
     )
-    assert [t["counterpart"] for t in report["transactions"]] == [
-        "Exchange -> treasury",
-        "treasury -> cold",
-        "cold -> Exchange",
-        "cold -> treasury",
+    assert [(t["wallet"], t["counterpart"]) for t in report["transactions"]] == [
+        ("treasury", "Exchange"),
+        ("treasury -> cold", ""),
+        ("cold", "Exchange"),
+        ("cold -> treasury", ""),
     ]
     treasury, cold = report["wallets"]  # oldest first: treasury received before cold did
     assert (cold["name"], cold["opening_sat"], cold["closing_sat"]) == ("cold", 0, 0)
+    # what each wallet received from others, sent to others, moved between the holder's wallets and paid in fees: D's fee
+    # (500) is split pro rata to what each put in (29,000 and 49,500), the odd satoshi to the larger; transfers cancel
+    assert {k: treasury[f"{k}_sat"] for k in ("received", "sent", "transfers", "fees", "mixed")} == {
+        "received": 100_000, "sent": 0, "transfers": -20_816, "fees": 1_184, "mixed": 0,
+    }  # fmt: skip
+    assert {k: cold[f"{k}_sat"] for k in ("received", "sent", "transfers", "fees", "mixed")} == {
+        "received": 0, "sent": 20_000, "transfers": 20_816, "fees": 816, "mixed": 0,
+    }  # fmt: skip
+    for w in (treasury, cold):
+        assert (
+            w["opening_sat"] + w["received_sat"] - w["sent_sat"] + w["transfers_sat"] - w["fees_sat"] + w["mixed_sat"] == w["closing_sat"]
+        )
+    totals = report["wallets_totals"]
+    assert (totals["received_sat"], totals["sent_sat"], totals["transfers_sat"], totals["fees_sat"], totals["closing_btc"]) == (
+        100_000, 20_000, 0, 2_000, "0.00078000",
+    )  # fmt: skip
     assert (treasury["name"], treasury["opening_sat"], treasury["closing_sat"], treasury["closing_btc"]) == (
         "treasury",
         0,
@@ -112,10 +128,21 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
     ]
     assert (tmp_path / "h.csv").read_text().startswith("treasury\ntime,txid,category,amount,balance,wallet\n")
     html = render_html(report)
-    assert "From → to" in html and "treasury → cold" in html and "<td>treasury</td>" in html and "Wallets of the holder" in html
-    # one wallet alone is still its own view: no transfer, no wallet column
+    # the summary: from the opening holdings to the closing, the holder's wallets each a line; the movements name the wallet
+    assert (
+        'Received from others</td><td class="num">0.00100000</td>' in html
+        and 'Sent to others</td><td class="num">(0.00020000)</td>' in html
+    )
+    assert '<td class="num">(0.00020816)</td><td class="num">(0.00001184)</td><td class="num">0.00078000</td>' in html  # treasury
+    assert '<td class="num">0.00020816</td><td class="num">(0.00000816)</td><td class="num">–</td>' in html  # cold: nothing left
+    assert '<td class="num">–</td><td class="num">(0.00002000)</td><td class="num">0.00078000</td>' in html  # 2 wallets: transfers cancel
+    assert "<th>Wallet</th>" in html and "<td>treasury → cold</td><td></td>" in html and "<td>Transfer</td>" in html
+    # no transaction identifier in the movements: the number of a movement finds it in section 4, once
+    assert html.count(C) == 1 and html.index("The transactions") < html.index(C) and html.count("Proof of control of the scriptPubKey") == 1
+    assert '<tr class="group"><td colspan="6">treasury</td></tr>' in html and html.count('<tr class="group">') == 1  # cold holds nothing
+    # one wallet alone is still its own view: no transfer, no wallet column, no table of wallets
     alone = build_report(histories["treasury"], period_for_heights(nodes["treasury"], 1000, 1010), label="treasury", cli=None)
-    assert alone["wallets"] is None and "From → to" not in render_html(alone)
+    assert alone["wallets"] is None and "<th>Wallet</th>" not in render_html(alone) and 'class="wallets"' not in render_html(alone)
     with pytest.raises(ValueError, match="different chains"):
         merge_histories({"a": histories["treasury"], "b": History("test", None, 1, "00", "", [], [])})
     emptied = History(merged.chain, None, 900, "00" * 32, "2020-01-01T00:00:00Z", [], [])  # kept on file: its old tip does not cut
@@ -202,7 +229,16 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
     assert written["period"]["end"]["height"] == 1012 and [w["history"]["source"] for w in written["wallets"]] == ["node", "file"]
     assert [w["history"]["tip_height"] for w in written["wallets"]] == [1012, 1010]
     assert csv_blocks(tmp_path / "kept" / f"company-{date2}.csv") == blocks
-    assert "(history kept " in (tmp_path / "kept" / f"company-{date2}.html").read_text()
+    assert "history kept " in (tmp_path / "kept" / f"company-{date2}.html").read_text()
+    # the statement before: the ledger in the tree that closed at this one's opening block is cited, with its reference
+    first_ref = json.loads((directory / f"company-{date}.json").read_text())["report_id"]
+    assert cli_module.main(["holder", "--from-height", "1010", "--to-height", "1012", "-o", str(tmp_path / "next")]) == 1
+    assert f"opening: the closing of {date} (ref {first_ref})" in capsys.readouterr().err
+    following = json.loads((tmp_path / "next" / "company-1010..1012.json").read_text())
+    assert following["previous"] == {
+        "label": date, "report_id": first_ref, "file": f"company-{date}.json", "closing_sat": 78_000, "closing_btc": "0.00078000", "agrees": True,
+    }  # fmt: skip
+    assert f"the closing holdings of {date}, reference {first_ref}" in (tmp_path / "next" / "company-1010..1012.html").read_text()
     assert cli_module.main(["report", "-w", "cold", "--from-height", "1004", "--to-height", "1010", "-o", str(tmp_path / "c")]) == 0
     assert "cold: not loaded; from history.json" in capsys.readouterr().err  # a wallet's own statement, the same way
     nodes.pop("treasury")  # treasury unloaded too: it held coins at its kept tip, so a spend since would be missed

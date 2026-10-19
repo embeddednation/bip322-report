@@ -113,6 +113,7 @@ def test_report_backs_every_closing_coin_with_a_verified_proof(tmp_path, wallet,
         "received_sat": 0, "received_btc": "0.00000000", "sent_sat": 20_000_000, "sent_btc": "0.20000000",
         "mixed_sat": 0, "mixed_btc": "0.00000000", "mixed_count": 0, "amount_sat": -20_000_000, "amount_btc": "-0.20000000",
         "fees_sat": 1_100_000, "fees_btc": "0.01100000", "net_sat": -21_100_000, "net_btc": "-0.21100000", "transactions": 2,
+        "fiat": None,
     }  # fmt: skip
     cov = report["coverage"]
     assert (cov["covered_count"], cov["total_count"], cov["covered_sat"], cov["complete"]) == (1, 3, 25_000_000, False)
@@ -298,7 +299,13 @@ def test_cli_end_to_end_with_fake_node(tmp_path, wallet, signer_expressions, mon
     written = json.loads(Path("y/watch-2023.json").read_text())
     assert (
         written["period"]["label"] == "2023"
-        and written["fiat"] == {"currency": "USD", "source": "constant 5 USD/BTC"}
+        and written["fiat"]
+        == {
+            "currency": "USD",
+            "source": "constant 5 USD/BTC",
+            "opening": {"rate": "5", "value": "0.00"},
+            "closing": {"rate": "5", "value": "3.20"},
+        }
         and written["ok"] is False
     )
     assert cli_module.main(["help", "report"]) == 0 and "Examples:" in capsys.readouterr().out
@@ -619,3 +626,51 @@ def test_a_proof_that_fails_the_statements_own_verification_is_not_ok(tmp_path, 
     # the counts by output and by address agree: an address is covered exactly when its outputs are
     for a in report["closing"]["addresses"]:
         assert all(o["proof"]["verified"] == a["proof"]["verified"] for o in a["outputs"])
+
+
+def test_one_page_per_address_and_the_transactions_by_number(wallet):
+    """An address holding several UTXOs gets one page: the proof once, a lookup per UTXO; the movements carry numbers, not txids."""
+    node = _node(wallet, tip=1000)
+    report = build_report(fetch_history(node), period_for_heights(node, 985, 1000), label="x", cli=None)
+    assert [(a["address"][:6], len(a["outputs"]), a["total_btc"]) for a in report["closing"]["addresses"]] == [
+        (wallet.derive(0, 1).address[:6], 1, "0.10000000"),  # by first coin: cc arrived at block 980
+        (wallet.derive(0).address[:6], 2, "0.75000000"),
+    ]
+    html = render_html(report)
+    assert html.count("Proof of control of the scriptPubKey") == 2 and html.count('<td class="k">utxo</td>') == 3
+    assert "2 UTXOs, 0.75000000 BTC, received 2023-11-" in html and "3.1</td>" in html and "3.2</td>" in html
+    assert "The closing UTXO" not in html  # no proofs here: ATTENTION, and no sentence saying what is proven
+    rows = html.split("The transactions")[1]
+    assert rows.count("aa" * 32) == 1 and rows.count("bb" * 32) == 1 and html.split("Holdings at the end")[0].count("aa" * 32) == 0
+    assert ">1</td><td>2023-11-" in rows and ">2</td><td>2023-11-" in rows
+
+
+def test_the_statement_before_is_the_one_that_closed_at_the_opening_block(tmp_path):
+    from bip322report.report import previous_statement
+
+    report = {"period": {"start": {"height": 1000}}, "opening": {"total_sat": 78_000}}
+    archive = tmp_path / "statements"
+    assert previous_statement(None, report) is None and previous_statement(archive, report) is None
+
+    def statement(label, end, closing, generated, ref):
+        (archive / label).mkdir(parents=True, exist_ok=True)
+        text = json.dumps(
+            {
+                "period": {"end": {"height": end}, "label": label},
+                "closing": {"total_sat": closing},
+                "generated_utc": generated,
+                "report_id": ref,
+            }
+        )
+        (archive / label / f"x-{label}.json").write_text(text)
+
+    statement("2024", 900, 5, "2025-01-01T00:00:00Z", "a" * 16)  # closed elsewhere
+    (archive / "2024" / "x-2024.csv").write_text("not json")
+    (archive / "2024" / "broken.json").write_text("{")
+    assert previous_statement(archive, report) is None
+    statement("2025", 1000, 78_000, "2026-01-02T00:00:00Z", "b" * 16)
+    statement("2025-again", 1000, 70_000, "2026-01-01T00:00:00Z", "c" * 16)  # older: the newest wins
+    assert previous_statement(archive, report) == {
+        "label": "2025", "report_id": "b" * 16, "file": "x-2025.json", "closing_sat": 78_000, "closing_btc": "0.00078000", "agrees": True,
+    }  # fmt: skip
+    assert previous_statement(archive, {**report, "opening": {"total_sat": 1}})["agrees"] is False

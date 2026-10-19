@@ -33,9 +33,12 @@ given as its argument.
   derivation path or node wallet name. It keeps that one name wherever it
   goes: in the snapshot, beside a statement, on the auditor's disk.
 * **The statement** (`bip322 report`) is the document for the
-  auditor: opening and closing balances, the movements, the closing UTXOs
-  each backed by a verified proof, one page per UTXO with the two commands
-  that check it, a section on how a proof works, and notes.
+  auditor: a summary from the opening holdings to the closing ones, the
+  movements, the closing addresses each backed by a verified proof, one page
+  per address with the commands that check it, the transactions by number, a
+  section on how a proof works, and notes. A holder's ledger (`bip322 report
+  holder`) is the same document over every wallet of the holder's, with a
+  table of the wallets on the first page.
 
 ## Where everything lives
 
@@ -132,8 +135,12 @@ other key there is a default for the holder's wallets. The holder
 may be left off the command inside its directory, with `holder = KEY` in
 `bip322.toml`, or when the tree has one holder. The wallets' histories merge: a transaction that moves coins from one of the holder's
 wallets to another is one movement of kind `transfer`, its fee the only
-cost, and the balance is the holder's total, each wallet's beside it in the
-JSON and the statement. Without a period the ledger runs from the block
+cost, and the balance is the holder's total; the first page has a table of
+the wallets, each one's opening, received from others, sent to others,
+transfers between the holder's wallets (in less out: they cancel in the
+total), fees and closing, and the movements name the wallet beside the
+counterparty. The opening line cites the ledger in the tree that closed at
+this one's opening block, by label and reference, so the statements chain. Without a period the ledger runs from the block
 before the first transaction to the tip and is labelled by the tip's date;
 `--year` and the other period options work as for a wallet's statement. The
 CSV has the same six columns in one block per wallet, the wallet's name on a
@@ -303,24 +310,29 @@ with the chain (no wallet, no txindex), and `pip install bip322-audit`
 (`bip322-audit[kernel]` on Linux x86_64 with Python 3.12 adds Bitcoin Core's
 script interpreter as a second engine; bip322-report is not needed to verify).
 
-1. **Read the statement.** Page 1: the movements, whose closing row is the
-   holdings on the chain, and the closing UTXOs. Any failed check appears
-   on page 1 as ATTENTION with a checklist; otherwise nothing says OK
-   beyond the figures. A movement of kind `mixed` was funded by the wallet
-   and by others: its fee is unknown and shown as such, its amount is the
-   wallet's net.
+1. **Read the statement.** Page 1: the summary, from the opening holdings
+   through what was received, sent and paid in fees to the closing
+   holdings, which are the holdings on the chain; the opening line names
+   the statement before, whose closing holdings they were. For a holder, a
+   table of its wallets follows, transfers between them cancelling in the
+   total. One sentence says what is proven; any failed check appears
+   instead as ATTENTION with a checklist. Then the movements, numbered,
+   and the closing addresses with each proof's verdict. A joint
+   transaction was funded by the wallet and by others: its fee is unknown
+   and shown as such, its amount is the wallet's net.
 2. **Re-verify the proofs** on your own node:
    `bip322 audit verify treasury-2026-01-08-931871-proofs.json`.
    This checks every signature with every engine installed, that the
    block named in the message exists at that height with that time, and
    that every output the file lists existed at that block.
-3. **Re-run any page.** Each UTXO page prints two commands with their
-   output: `bip322 verifymessage <scriptPubKey> <proof> "<message>"`, and
-   `bip322 audit holdings <txid>:<vout> --at <block>`. Paste them as they
-   stand; the backslashes continue the lines. For a second opinion on a
+3. **Re-run any page.** Each address page prints the commands with their
+   output: `bip322 verifymessage <scriptPubKey> <proof> "<message>"` once,
+   and `bip322 audit holdings <txid>:<vout> --at <block>` for each UTXO at
+   the address. Paste them as they stand; the backslashes continue the
+   lines. Section 4 gives every movement's transaction by its number. For a second opinion on a
    proof, the reference checks in the bip322-core repository run other implementations beside the
    verifier.
-4. **Read section 4** for what a proof shows: that at the block named the
+4. **Read section 5** for what a proof shows: that at the block named the
    holder could produce a valid spend from the scriptPubKey, which is what
    controlling the UTXOs locked to it means; not who owns the coins, not
    what liabilities stand against them, nothing about any later time.

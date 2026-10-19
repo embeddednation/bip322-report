@@ -48,7 +48,7 @@ from .holder import merge_histories
 from .names import counterparts, name_by_wallets
 from .period import Period, block, last_block_before, parse_when, period_between, period_for_heights, period_for_year
 from .render import HEADINGS, PACKAGE_FONTS, THEMES, render_history_html, render_html, write_csv, write_pdf
-from .report import build_report, format_summary
+from .report import build_report, format_summary, previous_statement
 
 EXPLORER = "https://mempool.space"  # mainnet only: on another chain its links would lead to the wrong transactions
 DUST_MAX = 10_000  # satoshi; a higher --dust would leave real coins out of the statement, so it needs --dust-force
@@ -420,7 +420,16 @@ def cmd_report(args) -> int:
         addresses=names,
         node_check=any(a.startswith("-rpcwallet=") for a in cli.argv),  # not for a wallet the node has not loaded
     )
+    report["previous"] = previous_statement(_archive(statements_dir, wallet), report)
     return _write_statement(args, config, wallet, report, directory, _file_stem(wallet, period_label), roots, history.chain, theme, pdf)
+
+
+def _archive(where, key: str) -> Path | None:
+    """The wallet's or the holder's ``statements/`` in the tree, where the statement before this one is; None outside a tree."""
+    try:
+        return where(key)
+    except ConfigError:
+        return None
 
 
 def _write_statement(
@@ -518,6 +527,7 @@ def cmd_holder(args) -> int:
         sources=sources,
         node_check=False,
     )
+    report["previous"] = previous_statement(_archive(holder_statements_dir, key), report)
     return _write_statement(args, config, None, report, directory, f"{slug}-{period.label}", roots, history.chain, theme, pdf, holder=key)
 
 
