@@ -629,7 +629,7 @@ def test_a_proof_that_fails_the_statements_own_verification_is_not_ok(tmp_path, 
 
 
 def test_one_page_per_address_and_the_transactions_by_number(wallet):
-    """An address holding several UTXOs gets one page: the proof once, a lookup per UTXO; the movements carry numbers, not txids."""
+    """An address holding several UTXOs gets one page: the proof once, a lookup per UTXO; a movement names its transaction briefly."""
     node = _node(wallet, tip=1000)
     report = build_report(fetch_history(node), period_for_heights(node, 985, 1000), label="x", cli=None)
     assert (
@@ -644,9 +644,9 @@ def test_one_page_per_address_and_the_transactions_by_number(wallet):
     assert "2 UTXOs, 0.75000000 BTC, received 2023-11-" in html and "3.1</td>" in html and "3.2</td>" in html
     assert "The closing UTXO" not in html  # no proofs here: ATTENTION, and no sentence saying what is proven
     movements = html.split("Holdings at the end")[0]
-    assert "aa" * 32 not in movements and '<td class="num muted">2</td><td>2023-11-' in movements  # numbered, no txid
+    assert "aa" * 32 not in movements and '<td class="mono muted">bbbbbbbb</td><td>2023-11-' in movements  # the first characters only
     linked = render_html(report, explorer="https://x").split("Holdings at the end")[0]
-    assert f'<a class="n" href="https://x/tx/{"bb" * 32}?showDetails=true" title="{"bb" * 32}">2</a>' in linked
+    assert f'<a href="https://x/tx/{"bb" * 32}?showDetails=true" title="{"bb" * 32}">bbbbbbbb</a>' in linked
 
 
 def test_the_statement_before_is_the_one_that_closed_at_the_opening_block(tmp_path):

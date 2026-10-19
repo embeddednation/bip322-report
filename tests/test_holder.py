@@ -105,25 +105,25 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
         "0.00078000",
     )
 
-    # each wallet's own view of the same movements: the ledger's number, the amount before the fee, its fee, its net, its own
-    # running balance, the other side plain; a move between the wallets pairs by number and amount
+    # each wallet's own view of the same movements: the amount before the fee, its fee, its net, its own running balance,
+    # the other side plain; a move between the wallets pairs by txid and amount
     def rows(w):
         return [
-            (t["n"], t["kind"], t["amount_sat"], t["fee_sat"], t["net_sat"], t["balance_after_sat"], t["counterpart"])
+            (t["txid"][:2], t["kind"], t["amount_sat"], t["fee_sat"], t["net_sat"], t["balance_after_sat"], t["counterpart"])
             for t in w["transactions"]
         ]
 
     assert rows(treasury) == [
-        (1, "receive", 100_000, None, 100_000, 100_000, "Exchange"),
-        (2, "send", -70_000, 1_000, -71_000, 29_000, "cold"),
-        (4, "receive", 49_184, 184, 49_000, 78_000, "cold"),
+        ("a1", "receive", 100_000, None, 100_000, 100_000, "Exchange"),
+        ("b2", "send", -70_000, 1_000, -71_000, 29_000, "cold"),
+        ("d4", "receive", 49_184, 184, 49_000, 78_000, "cold"),
     ]
     assert rows(cold) == [
-        (2, "receive", 70_000, None, 70_000, 70_000, "treasury"),
-        (3, "send", -20_000, 500, -20_500, 49_500, "Exchange"),
-        (4, "send", -49_184, 316, -49_500, 0, "treasury"),
+        ("b2", "receive", 70_000, None, 70_000, 70_000, "treasury"),
+        ("c3", "send", -20_000, 500, -20_500, 49_500, "Exchange"),
+        ("d4", "send", -49_184, 316, -49_500, 0, "treasury"),
     ]
-    assert [t["n"] for t in report["transactions"]] == [1, 2, 3, 4]
+    assert "n" not in report["transactions"][0] and "n" not in treasury["transactions"][0]
     assert report["totals"]["fees_sat"] == 2_000 and report["reconciliation"]["ok"] and report["node_check"] is None
     assert "wallets: treasury 0.00078000 BTC, cold 0.00000000 BTC" in format_summary(report)
     write_csv(report, tmp_path / "h.csv")
@@ -154,14 +154,20 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
     assert html.index("Opening holdings") < html.index('<td class="sub">cold</td>') < html.index("Closing holdings")
     assert "<th>Wallet</th>" not in html and "Transfers" not in html and "0.00149184" not in html and "<td>Transfer</td>" not in html
     assert html.index("1.1 treasury</h3>") < html.index("1.2 cold</h3>")
-    numbers = [html.count(f'<td class="num muted">{n}</td>') for n in (1, 2, 3, 4)]
-    assert numbers == [1, 2, 1, 2]  # the moves between the wallets (2 and 4) on both sides, nothing else numbered
+    named = [html.count(f'<td class="mono muted">{x[:8]}</td>') for x in (A, B, C, D)]
+    assert named == [1, 2, 1, 2]  # the moves between the wallets (B and D) on both sides, each transaction by its first characters
+    assert (
+        html.index("Opening holdings")
+        < html.index("At the end of the period")
+        < html.index('<td class="sub">treasury</td><td class="num">0.00078000')
+        < html.index("Closing holdings")
+    )
     assert '<td>Sent</td><td>cold</td><td class="num">(0.00070000)</td><td class="num">(0.00001000)</td>' in html
     assert '<td>Received</td><td>treasury</td><td class="num">0.00070000</td><td class="num"></td>' in html
     # no transaction identifier in the movements, and no list of them: the number links to the transaction when an explorer is named
     assert C not in html and "The transactions" not in html and html.count("Proof of control of the scriptPubKey") == 1
     linked = render_html(report, explorer="https://x")
-    assert linked.count(f'<a class="n" href="https://x/tx/{C}?showDetails=true" title="{C}">3</a>') == 1 and linked.count(C) == 2
+    assert linked.count(f'<a href="https://x/tx/{C}?showDetails=true" title="{C}">{C[:8]}</a>') == 1 and linked.count(C) == 2
     assert '<tr class="group"><td colspan="6">treasury</td></tr>' in html and html.count('<tr class="group">') == 1  # cold holds nothing
     # one wallet alone is still its own view: no transfer, no wallet column, no table of wallets
     alone = build_report(histories["treasury"], period_for_heights(nodes["treasury"], 1000, 1010), label="treasury", cli=None)

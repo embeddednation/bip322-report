@@ -327,12 +327,12 @@ def _wallet_rows(
     """A holder's movements as one of its wallets sees them: the wallet's net (fee inside), a running balance of its own, and
     the other side plain: another wallet of the holder's, or what ``[addresses]`` names.  A move between two of the holder's
     wallets is a send on one side and a receive on the other for the same amount (``amount_sat``, before the fee, which the
-    sender's row carries), as in each wallet's own statement; ``n`` is the movement's number in the holder's ledger, the same
-    on both sides.  With the rows, the wallet's sums by SUMS (:func:`_wallet_share`)."""
+    sender's row carries) under the same txid, as in each wallet's own statement.  With the rows, the wallet's sums by SUMS
+    (:func:`_wallet_share`)."""
     rows = []
     running = opening_sat
     sums = dict.fromkeys(SUMS, 0)
-    for n, tx in enumerate(movements, 1):
+    for tx in movements:
         spent = sum(c.amount_sat for c in tx.ours_in if c.wallet == wallet)
         got = sum(c.amount_sat for c in tx.ours_out if c.wallet == wallet)
         if not any(c.wallet == wallet for c in tx.ours_in + tx.ours_out):
@@ -344,7 +344,6 @@ def _wallet_rows(
             sums[key] += sat
         kind, counterpart = _wallet_side(tx, wallet, any(c.wallet == wallet for c in tx.ours_in), net, names)
         row = {
-            "n": n,
             "txid": tx.txid,
             "height": tx.height,
             "time": tx.time,
@@ -443,8 +442,8 @@ def _movement_rows(
     valued = dict.fromkeys(("received", "sent", "fees", "mixed"), Decimal(0))
     unvalued = False
     running = opening_sat
-    for n, tx in enumerate(movements, 1):
-        row = {"n": n, **tx.to_dict()}  # numbered in chain order: what section 4 lists them by
+    for tx in movements:
+        row = tx.to_dict()
         running += tx.net_sat
         row["balance_after_sat"] = running
         row["balance_after_btc"] = btc(running)

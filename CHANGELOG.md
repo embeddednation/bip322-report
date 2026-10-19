@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.25.0 (2026-10-19)
+
+The closing holdings close the first page's table, each wallet's share
+listed above them under "At the end of the period". A movement is named by
+the first eight characters of its transaction id, linked to the explorer,
+instead of a number; `n` is gone from the JSON.
+
 ## 0.24.0 (2026-10-19)
 
 One table on the first page: the opening holdings with each wallet's share

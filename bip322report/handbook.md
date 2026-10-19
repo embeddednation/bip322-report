@@ -137,9 +137,9 @@ may be left off the command inside its directory, with `holder = KEY` in
 `bip322.toml`, or when the tree has one holder. The wallets' histories merge: a transaction that moves coins from one of the holder's
 wallets to another is one movement of kind `transfer`, its fee the only
 cost, and the balance is the holder's total; the first page lists each
-wallet's share under the opening and under the closing holdings, and the
+wallet's share under the opening holdings and above the closing ones, and the
 movements are one block per wallet, a move between two of them sent by the
-one and received by the other under one number on both sides for the same
+one and received by the other under the same transaction for the same
 amount, the fee with the sender. The opening line cites the ledger
 in the tree that closed at this one's opening block, by label and reference,
 so the statements chain. Without a period the ledger runs from the block
@@ -316,11 +316,12 @@ script interpreter as a second engine; bip322-report is not needed to verify).
    through what was received, sent and paid in fees to the closing
    holdings, which are the holdings on the chain; the opening line names
    the statement before, whose closing holdings they were. For a holder,
-   each wallet's share is listed under both. One sentence says what is proven; any failed check
-   appears instead as ATTENTION with a checklist. Then the movements,
-   numbered, one block per wallet for a holder, a move between wallets one
-   number on both sides, and the closing addresses with each proof's
-   verdict. A joint
+   each wallet's share is listed under the opening holdings and above the
+   closing ones. One sentence says what is proven; any failed check
+   appears instead as ATTENTION with a checklist. Then the movements, one
+   block per wallet for a holder, each transaction named by the first
+   eight characters of its id, a move between wallets on both sides under
+   the same one, and the closing addresses with each proof's verdict. A joint
    transaction was funded by the wallet and by others: its fee is unknown
    and shown as such, its amount is the wallet's net.
 2. **Re-verify the proofs** on your own node:
@@ -332,8 +333,8 @@ script interpreter as a second engine; bip322-report is not needed to verify).
    output: `bip322 verifymessage <scriptPubKey> <proof> "<message>"` once,
    and `bip322 audit holdings <txid>:<vout> --at <block>` for each UTXO at
    the address. Paste them as they stand; the backslashes continue the
-   lines. A movement's number links to its transaction on the explorer and
-   names it in the JSON (`n` on each movement). For a second opinion on a
+   lines. A movement's transaction name links to it on the explorer; the
+   JSON and the CSV carry the whole id. For a second opinion on a
    proof, the reference checks in the bip322-core repository run other implementations beside the
    verifier.
 4. **Read section 4** for what a proof shows: that at the block named the
