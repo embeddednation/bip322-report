@@ -409,6 +409,8 @@ def test_the_statement_is_the_default_command(wallet, run, capsys):
     assert with_default_command(["-w", "x"]) == ["-w", "x", "report"]
     assert with_default_command(["--dir", "d", "-y", "2026"]) == ["--dir", "d", "report", "-y", "2026"]
     assert with_default_command(["--dir=d"]) == ["--dir=d", "report"]
+    assert with_default_command(["company"]) == ["report", "company"]  # no such holder here: the parser will say so
+    assert with_default_command(["--dir", "no-such-dir", "company"]) == ["--dir", "no-such-dir", "report", "company"]
     node = _node(wallet, tip=1000)
     assert run(node, *HEIGHTS, "-o", "short")[0] == run(node, "report", *HEIGHTS, "-o", "long")[0] == 1  # no proofs: ATTENTION, both ways
     assert _written("short", ".json").exists() and _written("long", ".json").exists()

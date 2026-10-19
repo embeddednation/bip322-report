@@ -632,10 +632,13 @@ def test_one_page_per_address_and_the_transactions_by_number(wallet):
     """An address holding several UTXOs gets one page: the proof once, a lookup per UTXO; the movements carry numbers, not txids."""
     node = _node(wallet, tip=1000)
     report = build_report(fetch_history(node), period_for_heights(node, 985, 1000), label="x", cli=None)
-    assert [(a["address"][:6], len(a["outputs"]), a["total_btc"]) for a in report["closing"]["addresses"]] == [
-        (wallet.derive(0, 1).address[:6], 1, "0.10000000"),  # by first coin: cc arrived at block 980
-        (wallet.derive(0).address[:6], 2, "0.75000000"),
-    ]
+    assert (
+        [(a["address"][:6], len(a["outputs"]), a["total_btc"]) for a in report["closing"]["addresses"]]
+        == [
+            (wallet.derive(0, 1).address[:6], 1, "0.10000000"),  # by first coin: cc arrived at block 980
+            (wallet.derive(0).address[:6], 2, "0.75000000"),
+        ]
+    )
     html = render_html(report)
     assert html.count("Proof of control of the scriptPubKey") == 2 and html.count('<td class="k">utxo</td>') == 3
     assert "2 UTXOs, 0.75000000 BTC, received 2023-11-" in html and "3.1</td>" in html and "3.2</td>" in html

@@ -180,7 +180,7 @@ def test_a_transaction_funded_with_others_is_mixed_and_its_fee_unknown(tmp_path,
     report = _report(node)
     assert _rows(report) == [("b2", "mixed", -70_000, None, 30_000), ("c3", "internal", 0, 1_000, 29_000)] and _exact(report)
     assert (report["totals"]["sent_sat"], report["totals"]["mixed_sat"], report["totals"]["fees_sat"]) == (0, -70_000, 1_000)
-    assert "Joint transactions, the wallet's net</td><td class=\"num\">(0.00070000)</td>" in render_html(report)
+    assert 'Joint transactions, the wallet\'s net</td><td class="num">(0.00070000)</td>' in render_html(report)
     assert "mixed" not in render_html(_report(node, 1004, 1010))  # exceptions only
 
 

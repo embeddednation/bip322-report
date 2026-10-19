@@ -266,6 +266,11 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
     )
     assert cli_module.main(["holder", "company", "-o", str(tmp_path / "company")]) == 1
     assert "asking cold which of 2 addresses are theirs" in capsys.readouterr().err
+    assert cli_module.main(["company", "-o", str(tmp_path / "bare")]) == 1  # bip322 report company: the holder's ledger
+    capsys.readouterr()
+    assert (tmp_path / "bare" / f"company-{date}.json").exists()
+    assert cli_module.main(["--dir", str(root), "company", "-o", str(tmp_path / "bare2")]) == 1 and (tmp_path / "bare2").is_dir()
+    capsys.readouterr()
     blocks = csv_blocks(tmp_path / "company" / f"company-{date}.csv")
     assert [(r["category"], r["wallet"]) for r in blocks["treasury"]] == [("receive", "Exchange"), ("send", "cold"), ("mixed", "cold")]
     assert cli_module.main(["holder", "jonas", "-o", str(tmp_path / "jonas")]) == 0  # cold holds nothing at the end: nothing to cover

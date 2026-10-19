@@ -126,6 +126,7 @@ A holder with several wallets gets one ledger over all of them:
 
 ```sh
 bip322 report holder company          # -> company/statements/2026-10-15/: company-2026-10-15.pdf (or .html), .json, .csv, -history.pdf
+bip322 report company                 # the same: a bare word that names a holder of the tree means its ledger
 ```
 
 A holder is a directory of the tree, and its wallets are the wallet

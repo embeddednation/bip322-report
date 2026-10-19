@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.22.1 (2026-10-19)
+
+`bip322 report company` is `bip322 report holder company`: a bare word that
+names a holder of the tree means its ledger.
+
 ## 0.22.0 (2026-10-19)
 
 The statement for the auditor, laid out like the reader's history. A summary

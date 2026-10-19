@@ -744,8 +744,9 @@ def with_default_command(argv: list[str]) -> list[str]:
     """``bip322-report OPTIONS`` is ``bip322-report report OPTIONS``: the statement is what the command is for.
 
     The first word after the global options decides: a command name, or
-    ``-h``/``--help``/``--version``, is left alone; anything else (an option
-    of the statement, or nothing at all) gets ``report`` put before it.  No
+    ``-h``/``--help``/``--version``, is left alone; a holder of the tree
+    (``bip322 report company``) gets ``holder`` put before it; anything else
+    (an option of the statement, or nothing at all) gets ``report``.  No
     argument at all lists the commands.
     """
     i = 0
@@ -758,8 +759,22 @@ def with_default_command(argv: list[str]) -> list[str]:
         elif tok in COMMANDS or tok in ("-h", "--help", "--version"):
             return argv
         else:
-            return [*argv[:i], "report", *argv[i:]]
+            return [*argv[:i], "holder" if _is_holder(tok, argv[:i]) else "report", *argv[i:]]
     return [*argv, "report"] if argv else ["help"]
+
+
+def _is_holder(word: str, options: list[str]) -> bool:
+    """Whether a bare word names a holder of the tree (``--dir`` among the options before it applies); never an error."""
+    if word.startswith("-"):
+        return False
+    with contextlib.suppress(ConfigError, OSError, ValueError):
+        for n, tok in enumerate(options):
+            if tok == "--dir" and n + 1 < len(options):
+                use_data_dir(options[n + 1])
+            elif tok.startswith("--dir="):
+                use_data_dir(tok.removeprefix("--dir="))
+        return word in holders()
+    return False
 
 
 def main(argv: list[str] | None = None) -> int:
