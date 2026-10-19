@@ -54,8 +54,9 @@ def build_report(
     (``holder.merge_histories``): each movement then names the wallet of the
     holder's it touched (``wallet``) beside the other side (``counterpart``),
     and the report carries each wallet's opening and closing balance, what it
-    received, sent, moved between the holder's wallets and paid in fees, and
-    the movements as that wallet sees them under ``wallets``, oldest wallet
+    received and sent (a move between the holder's wallets is sent by one and
+    received by the other, the fee with the sender), paid in fees, and the
+    movements as that wallet sees them under ``wallets``, oldest wallet
     first, with where its history came from when ``sources`` says (node, or the file
     kept for a wallet the node has not loaded).  ``node_check`` False leaves out the listunspent cross-check,
     which is per node wallet.
@@ -245,25 +246,28 @@ def _wallet_block(
     names: dict[str, str],
     source: dict | None,
 ) -> dict:
-    """One wallet of a holder: its opening and closing balance, what it received from others, sent to others, moved between
-    the holder's wallets (in less out), paid in fees and netted in joint transactions, the period's movements as it sees them,
-    and its history's source.  Opening + received - sent + transfers - fees + mixed = closing, for each wallet."""
+    """One wallet of a holder: its opening and closing balance, what it received and sent (from and to others, and from and
+    to the holder's other wallets: ``moved_in`` and ``moved_out`` say how much of each), paid in fees and netted in joint
+    transactions, the sum of its rows' amounts, the period's movements as it sees them, and its history's source.
+    Opening + received - sent - fees + mixed = closing, for each wallet."""
     o = sum(c.amount_sat for c in opening if c.wallet == wallet)
     s = sum(c.amount_sat for c in closing if c.wallet == wallet)
     rows, sums = _wallet_rows(movements, wallet, o, rates, names)
     block = {"name": wallet, "opening_sat": o, "opening_btc": btc(o)}
+    sums["amount"] = sums["received"] - sums["sent"] + sums["mixed"]
     for key, sat in sums.items():
         block[f"{key}_sat"], block[f"{key}_btc"] = sat, btc(sat)
     return {**block, "closing_sat": s, "closing_btc": btc(s), "transactions": rows, "history": source}
 
 
-SUMS = ("received", "sent", "transfers", "fees", "mixed")
+SUMS = ("received", "sent", "fees", "mixed", "moved_in", "moved_out")
 
 
 def _wallets_totals(blocks: list[dict]) -> dict:
-    """The holder's wallets added up: the ledger's own totals, and transfers between them that cancel to nothing."""
+    """The holder's wallets added up.  Received and sent include what moved between the wallets (``moved_in``, which equals
+    ``moved_out``), sent by one and received by another, so they exceed the ledger's own received and sent by that much."""
     totals = {}
-    for key in ("opening", *SUMS, "closing"):
+    for key in ("opening", *SUMS, "amount", "closing"):
         sat = sum(b[f"{key}_sat"] for b in blocks)
         totals[f"{key}_sat"], totals[f"{key}_btc"] = sat, btc(sat)
     return totals
@@ -282,27 +286,39 @@ def _share(total: int, weights: dict[str, int], who: str) -> int:
     return parts[who]
 
 
-def _wallet_share(tx: WalletTx, wallet: str, got: int, net: int) -> dict[str, int]:
-    """How one of the holder's wallets books a movement, by SUMS: received from others, sent to others, transfers between the
-    holder's wallets (in positive, out negative), the fee it paid, or its net of a joint transaction.
+def _wallet_share(tx: WalletTx, wallet: str, got: int, net: int) -> tuple[int, int | None, dict[str, int]]:
+    """One of the holder's wallets' side of a movement: its amount (what moved between it and the other side, before the
+    fee; negative when it left), its fee (None when it paid none, or it is unknown) and what the movement adds to the
+    wallet's sums (SUMS).
 
-    A wallet that only received booked what arrived: from others, or as a
-    transfer when another wallet of the holder's paid.  A wallet that spent
-    books what left to others and the fee, pro rata to what it put in when
-    several of the holder's wallets did, and the rest of its net is a transfer.
-    In a joint transaction (others' inputs beside the holder's) the fee is
-    unknown, and every wallet in it books its net as such.
+    A wallet that only received books what arrived as received, and as
+    ``moved_in`` too when another wallet of the holder's paid.  A wallet that
+    spent books what left to others and the fee, pro rata to what it put in
+    when several of the holder's wallets did; the rest of its amount moved
+    from or to the holder's other wallets (``moved_in``/``moved_out``, inside
+    received/sent), so that a move between two wallets is sent by one and
+    received by the other for the same amount, the fee with the sender.  In a
+    joint transaction (others' inputs beside the holder's) the fee is unknown,
+    and every wallet in it books its net as mixed.
     """
     if tx.mixed:
-        return {"mixed": net}
+        return net, None, {"mixed": net}
     if tx.kind == "swept" or not any(c.wallet == wallet for c in tx.ours_in):
-        return {"transfers" if tx.ours_in and tx.kind != "swept" else "received": got}
+        from_wallets = bool(tx.ours_in) and tx.kind != "swept"
+        return got, None, {"received": got, **({"moved_in": got} if from_wallets else {})}  # no fee of its own: the payer's
     spenders: dict[str, int] = {}
     for c in tx.ours_in:
         spenders[c.wallet or ""] = spenders.get(c.wallet or "", 0) + c.amount_sat
     sent = _share(sum(c.amount_sat for c in tx.others_out), spenders, wallet)
     fee = _share(tx.fee_sat or 0, spenders, wallet)
-    return {"sent": sent, "fees": fee, "transfers": net + sent + fee}
+    amount = net + fee
+    between = amount + sent  # what is not explained by others: moved from (positive) or to (negative) the holder's other wallets
+    sums = {"sent": sent, "fees": fee}
+    if between > 0:
+        sums.update(received=between, moved_in=between)
+    elif between < 0:
+        sums.update(sent=sent - between, moved_out=-between)
+    return amount, fee, sums
 
 
 def _wallet_rows(
@@ -310,27 +326,34 @@ def _wallet_rows(
 ) -> tuple[list[dict], dict[str, int]]:
     """A holder's movements as one of its wallets sees them: the wallet's net (fee inside), a running balance of its own, and
     the other side plain: another wallet of the holder's, or what ``[addresses]`` names.  A move between two of the holder's
-    wallets is a send on one side and a receive on the other, as in each wallet's own statement.  With the rows, the wallet's
-    sums by SUMS (:func:`_wallet_share`)."""
+    wallets is a send on one side and a receive on the other for the same amount (``amount_sat``, before the fee, which the
+    sender's row carries), as in each wallet's own statement; ``n`` is the movement's number in the holder's ledger, the same
+    on both sides.  With the rows, the wallet's sums by SUMS (:func:`_wallet_share`)."""
     rows = []
     running = opening_sat
     sums = dict.fromkeys(SUMS, 0)
-    for tx in movements:
+    for n, tx in enumerate(movements, 1):
         spent = sum(c.amount_sat for c in tx.ours_in if c.wallet == wallet)
         got = sum(c.amount_sat for c in tx.ours_out if c.wallet == wallet)
         if not any(c.wallet == wallet for c in tx.ours_in + tx.ours_out):
             continue
         net = got - spent
         running += net
-        for key, sat in _wallet_share(tx, wallet, got, net).items():
+        amount, fee, share = _wallet_share(tx, wallet, got, net)
+        for key, sat in share.items():
             sums[key] += sat
         kind, counterpart = _wallet_side(tx, wallet, any(c.wallet == wallet for c in tx.ours_in), net, names)
         row = {
+            "n": n,
             "txid": tx.txid,
             "height": tx.height,
             "time": tx.time,
             "time_utc": tx.iso_time,
             "kind": kind,
+            "amount_sat": amount,
+            "amount_btc": btc(amount),
+            "fee_sat": fee,
+            "fee_btc": btc(fee) if fee is not None else None,
             "net_sat": net,
             "net_btc": btc(net),
             "balance_after_sat": running,
@@ -339,7 +362,13 @@ def _wallet_rows(
         }
         if rates:
             rate = rates.rate_on(tx.time)
-            row["fiat"] = {"currency": rates.currency, "rate": str(rate) if rate is not None else None, "net": rates.value(net, tx.time)}
+            row["fiat"] = {
+                "currency": rates.currency,
+                "rate": str(rate) if rate is not None else None,
+                "amount": rates.value(amount, tx.time),
+                "net": rates.value(net, tx.time),
+                "fee": rates.value(fee, tx.time) if fee is not None else None,
+            }
         rows.append(row)
     return rows, sums
 
@@ -414,8 +443,8 @@ def _movement_rows(
     valued = dict.fromkeys(("received", "sent", "fees", "mixed"), Decimal(0))
     unvalued = False
     running = opening_sat
-    for tx in movements:
-        row = tx.to_dict()
+    for n, tx in enumerate(movements, 1):
+        row = {"n": n, **tx.to_dict()}  # numbered in chain order: what section 4 lists them by
         running += tx.net_sat
         row["balance_after_sat"] = running
         row["balance_after_btc"] = btc(running)

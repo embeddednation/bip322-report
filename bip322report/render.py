@@ -360,6 +360,7 @@ def render_html(
         .get_template("report.html")
         .render(
             r=report,
+            blocks=_blocks(report),
             explorer=(explorer or "").rstrip("/") or None,
             t=t,
             faces=faces,
@@ -402,21 +403,25 @@ def _proven(report: dict) -> str:
 
 
 def render_history_html(report: dict, *, theme: str = "journal", heading: str | None = None, fonts_url: str | None = None) -> str:
-    """The transaction history as HTML, for a reader: the movements of each wallet with the counterparty and the running balance,
-    no transaction identifiers, no proofs; the holder's wallets each a section, oldest first, a wallet's statement one."""
+    """The transaction history as HTML, for a reader: the movements of each wallet with the counterparty, the amount, the fee
+    and the running balance, no transaction identifiers, no proofs; the holder's wallets each a section, oldest first, a
+    wallet's statement one."""
     t, faces = _look(theme, heading, fonts_url)
-    return _env().get_template("history.html").render(r=report, blocks=_history_blocks(report), t=t, faces=faces, doc=HISTORY, kinds=KINDS)
+    return _env().get_template("history.html").render(r=report, blocks=_blocks(report), t=t, faces=faces, doc=HISTORY, kinds=KINDS)
 
 
-def _history_blocks(report: dict) -> list[dict]:
-    """The reader's document in blocks: the holder's wallets as the report has them, else the one wallet."""
+def _blocks(report: dict) -> list[dict]:
+    """The movements in blocks, one per wallet: the holder's wallets as the report has them, else the one wallet."""
     if report.get("wallets"):
         return report["wallets"]
+    totals = report["totals"]
     return [
         {
             "name": report["label"],
             "opening_btc": report["opening"]["total_btc"],
             "closing_btc": report["closing"]["total_btc"],
+            "amount_btc": totals["amount_btc"],
+            "fees_btc": totals["fees_btc"],
             "transactions": report["transactions"],
         }
     ]

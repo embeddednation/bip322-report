@@ -96,9 +96,10 @@ key there (`dust`, `theme`, …) is a default for the holder's wallets, between
 the wallet's own table and the top level. `bip322 report
 holder KEY` merges its wallets' histories into one ledger, a transfer between
 two of them one movement of kind `transfer`, the balance the holder's total,
-each wallet's opening, received, sent, transfers, fees and closing in a table
-on the first page, under `KEY/statements/<label>/`; its CSV is one block per
-wallet, under the wallet's name, as that wallet sees the movements. Every history read is kept
+each wallet's opening, received, sent, fees and closing in a table on the
+first page and its movements a block of their own, under
+`KEY/statements/<label>/`; its CSV is one block per wallet, under the
+wallet's name, as that wallet sees the movements. Every history read is kept
 in the wallet's directory as `history.json`, and a wallet the node has not
 loaded any more is read from that file, provided it held nothing at the
 file's tip.
@@ -191,16 +192,19 @@ has a table of the holder's wallets and names the wallet in each movement.
   day. The opening line cites the statement in the tree that closed at this
   one's opening block, by label and reference, in red when its closing
   holdings are not these opening ones. For a holder, a table of its wallets
-  follows: each one's opening, received, sent, transfers between the
-  holder's wallets (in less out; they cancel in the total), fees and closing.
-  Then one sentence saying what is proven, or, when a check failed, an
+  follows: each one's opening, received, sent, fees and closing, where a
+  move between two of the holder's wallets is sent by the one and received
+  by the other, so the table foots and a note gives how much moved between
+  them. Then one sentence saying what is proven, or, when a check failed, an
   ATTENTION checklist.
-* The movements, in the style of a bank statement: each transaction numbered,
-  with its date, its kind in words (Received, Sent, Internal move, Transfer,
-  Joint transaction, Dust swept), the wallet (a holder's ledger), the
-  counterparty, the amount, the fee and the running balance; opening and
-  closing rows. No transaction identifiers here: the number finds the
-  transaction in section 4.
+* The movements, in the style of a bank statement, one block per wallet for
+  a holder: each transaction numbered, with its date, its kind in words
+  (Received, Sent, Internal move, Joint transaction, Dust swept), the
+  counterparty, the amount before the fee, the fee and the wallet's running
+  balance; opening and closing rows. A move between two of the holder's
+  wallets carries one number in both blocks, sent by the one and received
+  by the other for the same amount, the fee with the sender. No transaction
+  identifiers here: the number finds the transaction in section 4.
 * Holdings at the end of the period: one row per address (a holder's grouped
   by wallet) with when its coins arrived, how many UTXOs it holds, the
   amount, the proof's verdict and block, and the page of section 3 that

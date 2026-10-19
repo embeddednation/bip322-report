@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.23.0 (2026-10-19)
+
+The holder's movements one block per wallet, as in the reader's history,
+and no Transfers column anywhere. A move between two of the holder's
+wallets is sent by the one and received by the other for the same amount,
+the fee with the sender, and carries one number in both blocks; section 4
+lists the transactions by that number. The wallets table on the first page
+has opening, received, sent, fees and closing, a note under it saying how
+much moved between the wallets. The reader's history shows the amount
+before the fee and the fee apart, so the two sides of a move match there
+too. In the JSON: `wallets[].transactions[]` carry `n`, `amount_sat` and
+`fee_sat`; `wallets[]` carry `moved_in_sat`, `moved_out_sat` and
+`amount_sat` instead of `transfers_sat`; every movement carries `n`.
+
 ## 0.22.1 (2026-10-19)
 
 `bip322 report company` is `bip322 report holder company`: a bare word that

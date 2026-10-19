@@ -21,14 +21,14 @@
 <h2><span class="n">{{ loop.index }}.</span> {{ b.name }}</h2>
 {% if b.transactions %}
 <table>
-  <colgroup><col class="w-date"><col style="width:17%"><col><col class="w-num"><col class="w-num">{% if r.fiat %}<col class="w-num">{% endif %}</colgroup>
-  <thead><tr><th>Date (UTC)</th><th>Kind</th><th>Counterparty</th><th class="num">Amount</th><th class="num">Balance</th>{% if r.fiat %}<th class="num">Amount {{ r.fiat.currency }}</th>{% endif %}</tr></thead>
+  <colgroup><col class="w-date"><col style="width:15%"><col><col class="w-num"><col class="w-num"><col class="w-num">{% if r.fiat %}<col class="w-num">{% endif %}</colgroup>
+  <thead><tr><th>Date (UTC)</th><th>Kind</th><th>Counterparty</th><th class="num">Amount</th><th class="num">Fee</th><th class="num">Balance</th>{% if r.fiat %}<th class="num">Amount {{ r.fiat.currency }}</th>{% endif %}</tr></thead>
   <tbody>
-  <tr class="open"><td colspan="4">Opening balance, {{ r.period.start.time_utc | utc }}</td><td class="num">{{ b.opening_btc }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
+  <tr class="open"><td colspan="5">Opening balance, {{ r.period.start.time_utc | utc }}</td><td class="num">{{ b.opening_btc }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
   {% for t in b.transactions %}
-  <tr><td>{{ t.time_utc[:10] }}</td><td>{{ kinds.get(t.kind, t.kind) }}</td><td>{{ t.counterpart }}</td><td class="num">{{ t.net_btc | acct }}</td><td class="num">{{ t.balance_after_btc }}</td>{% if r.fiat %}<td class="num">{{ (t.fiat.net | acct) if t.fiat.net else "" }}</td>{% endif %}</tr>
+  <tr><td>{{ t.time_utc[:10] }}</td><td>{{ kinds.get(t.kind, t.kind) }}</td><td>{{ t.counterpart }}</td><td class="num">{% if t.amount_sat %}{{ t.amount_btc | acct }}{% endif %}</td><td class="num">{% if t.kind == "mixed" %}<span class="muted">unknown</span>{% elif t.fee_btc %}({{ t.fee_btc }}){% endif %}</td><td class="num">{{ t.balance_after_btc }}</td>{% if r.fiat %}<td class="num">{{ (t.fiat.amount | acct) if t.fiat.amount and t.amount_sat else "" }}</td>{% endif %}</tr>
   {% endfor %}
-  <tr class="total"><td colspan="4">Closing balance, {{ r.period.end.time_utc | utc }}</td><td class="num">{{ b.closing_btc }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
+  <tr class="total"><td colspan="5">Closing balance, {{ r.period.end.time_utc | utc }}</td><td class="num">{{ b.closing_btc }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
   </tbody>
 </table>
 {% else %}
@@ -38,7 +38,7 @@
 
 <h3 class="notes">Notes</h3>
 <div class="small runin muted">
-  <p>Amounts in BTC to eight decimals, negatives in parentheses; an amount is the wallet's net of a transaction, the network fee inside it{% if r.fiat %}; {{ r.fiat.currency }} from {{ r.fiat.source }} at the rate on each transaction's day{% endif %}. The balance is the wallet's after the transaction. The counterparty is the other wallet, as the holder names it; empty when not known.</p>
+  <p>Amounts in BTC to eight decimals, negatives in parentheses; an amount is what moved between the wallet and the counterparty, received or (sent), before the network fee, which has a column of its own{% if r.fiat %}; {{ r.fiat.currency }} from {{ r.fiat.source }} at the rate on each transaction's day{% endif %}. The balance is the wallet's after the transaction, the amount and the fee together.{% if r.wallets %} A move between two of the holder's wallets is sent by the one and received by the other for the same amount, the fee with the sender.{% endif %} The counterparty is the other wallet, as the holder names it; empty when not known.</p>
   <p>{{ r.chain }} chain; opening figures at block {{ r.period.start.height }}, closing at block {{ r.period.end.height }}. Prepared {{ r.generated_utc | utc }} by {{ r.tool }}; reference {{ r.report_id }}. The statement of holdings and movements under the same reference carries the transaction identifiers and the proofs of control.</p>
 </div>
 </body>

@@ -78,39 +78,52 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
     ]
     treasury, cold = report["wallets"]  # oldest first: treasury received before cold did
     assert (cold["name"], cold["opening_sat"], cold["closing_sat"]) == ("cold", 0, 0)
-    # what each wallet received from others, sent to others, moved between the holder's wallets and paid in fees: D's fee
-    # (500) is split pro rata to what each put in (29,000 and 49,500), the odd satoshi to the larger; transfers cancel
-    assert {k: treasury[f"{k}_sat"] for k in ("received", "sent", "transfers", "fees", "mixed")} == {
-        "received": 100_000, "sent": 0, "transfers": -20_816, "fees": 1_184, "mixed": 0,
+    # what each wallet received and sent (a move between the holder's wallets is sent by one, received by the other, for the
+    # same amount, the fee with the sender) and paid in fees: D's fee (500) is split pro rata to what each put in (29,000
+    # and 49,500), the odd satoshi to the larger, so cold sends 49,184 to treasury and treasury receives 49,184
+    keys = ("received", "sent", "fees", "mixed", "moved_in", "moved_out")
+    assert {k: treasury[f"{k}_sat"] for k in keys} == {
+        "received": 149_184, "sent": 70_000, "fees": 1_184, "mixed": 0, "moved_in": 49_184, "moved_out": 70_000,
     }  # fmt: skip
-    assert {k: cold[f"{k}_sat"] for k in ("received", "sent", "transfers", "fees", "mixed")} == {
-        "received": 0, "sent": 20_000, "transfers": 20_816, "fees": 816, "mixed": 0,
+    assert {k: cold[f"{k}_sat"] for k in keys} == {
+        "received": 70_000, "sent": 69_184, "fees": 816, "mixed": 0, "moved_in": 70_000, "moved_out": 49_184,
     }  # fmt: skip
     for w in (treasury, cold):
-        assert (
-            w["opening_sat"] + w["received_sat"] - w["sent_sat"] + w["transfers_sat"] - w["fees_sat"] + w["mixed_sat"] == w["closing_sat"]
-        )
+        assert w["opening_sat"] + w["received_sat"] - w["sent_sat"] - w["fees_sat"] + w["mixed_sat"] == w["closing_sat"]
     totals = report["wallets_totals"]
-    assert (totals["received_sat"], totals["sent_sat"], totals["transfers_sat"], totals["fees_sat"], totals["closing_btc"]) == (
-        100_000, 20_000, 0, 2_000, "0.00078000",
-    )  # fmt: skip
+    assert (totals["received_sat"], totals["sent_sat"], totals["fees_sat"], totals["closing_btc"]) == (
+        219_184,
+        139_184,
+        2_000,
+        "0.00078000",
+    )
+    assert totals["moved_in_sat"] == totals["moved_out_sat"] == 119_184 and totals["amount_sat"] == 80_000
     assert (treasury["name"], treasury["opening_sat"], treasury["closing_sat"], treasury["closing_btc"]) == (
         "treasury",
         0,
         78_000,
         "0.00078000",
     )
-    # each wallet's own view of the same movements: its net, its own running balance, the other side plain
-    assert [(t["txid"][:2], t["kind"], t["net_sat"], t["balance_after_sat"], t["counterpart"]) for t in treasury["transactions"]] == [
-        ("a1", "receive", 100_000, 100_000, "Exchange"),
-        ("b2", "send", -71_000, 29_000, "cold"),
-        ("d4", "receive", 49_000, 78_000, "cold"),
+
+    # each wallet's own view of the same movements: the ledger's number, the amount before the fee, its fee, its net, its own
+    # running balance, the other side plain; a move between the wallets pairs by number and amount
+    def rows(w):
+        return [
+            (t["n"], t["kind"], t["amount_sat"], t["fee_sat"], t["net_sat"], t["balance_after_sat"], t["counterpart"])
+            for t in w["transactions"]
+        ]
+
+    assert rows(treasury) == [
+        (1, "receive", 100_000, None, 100_000, 100_000, "Exchange"),
+        (2, "send", -70_000, 1_000, -71_000, 29_000, "cold"),
+        (4, "receive", 49_184, 184, 49_000, 78_000, "cold"),
     ]
-    assert [(t["txid"][:2], t["kind"], t["net_sat"], t["balance_after_sat"], t["counterpart"]) for t in cold["transactions"]] == [
-        ("b2", "receive", 70_000, 70_000, "treasury"),
-        ("c3", "send", -20_500, 49_500, "Exchange"),
-        ("d4", "send", -49_500, 0, "treasury"),
+    assert rows(cold) == [
+        (2, "receive", 70_000, None, 70_000, 70_000, "treasury"),
+        (3, "send", -20_000, 500, -20_500, 49_500, "Exchange"),
+        (4, "send", -49_184, 316, -49_500, 0, "treasury"),
     ]
+    assert [t["n"] for t in report["transactions"]] == [1, 2, 3, 4]
     assert report["totals"]["fees_sat"] == 2_000 and report["reconciliation"]["ok"] and report["node_check"] is None
     assert "wallets: treasury 0.00078000 BTC, cold 0.00000000 BTC" in format_summary(report)
     write_csv(report, tmp_path / "h.csv")
@@ -128,21 +141,37 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
     ]
     assert (tmp_path / "h.csv").read_text().startswith("treasury\ntime,txid,category,amount,balance,wallet\n")
     html = render_html(report)
-    # the summary: from the opening holdings to the closing, the holder's wallets each a line; the movements name the wallet
+    # the summary: from the opening holdings to the closing, the holder's wallets each a line, the moves between them inside
+    # received and sent; then each wallet a block of movements, a move between two of them one number on both sides
     assert (
         'Received from others</td><td class="num">0.00100000</td>' in html
         and 'Sent to others</td><td class="num">(0.00020000)</td>' in html
     )
-    assert '<td class="num">(0.00020816)</td><td class="num">(0.00001184)</td><td class="num">0.00078000</td>' in html  # treasury
-    assert '<td class="num">0.00020816</td><td class="num">(0.00000816)</td><td class="num">–</td>' in html  # cold: nothing left
-    assert '<td class="num">–</td><td class="num">(0.00002000)</td><td class="num">0.00078000</td>' in html  # 2 wallets: transfers cancel
-    assert "<th>Wallet</th>" in html and "<td>treasury → cold</td><td></td>" in html and "<td>Transfer</td>" in html
+    assert (
+        '<td class="num">0.00149184</td><td class="num">(0.00070000)</td><td class="num">(0.00001184)</td><td class="num">0.00078000</td>'
+        in html
+    )
+    assert '<td class="num">0.00070000</td><td class="num">(0.00069184)</td><td class="num">(0.00000816)</td><td class="num">–</td>' in html
+    assert (
+        '<td class="num">0.00219184</td><td class="num">(0.00139184)</td><td class="num">(0.00002000)</td><td class="num">0.00078000</td>'
+        in html
+    )
+    assert "Received and sent include 0.00119184 moved between the holder's wallets" in html and "Transfers" not in html
+    assert (
+        html.index("1.1 treasury</h3>") < html.index("1.2 cold</h3>")
+        and html.count("<th>Wallet</th>") == 1
+        and "<td>Transfer</td>" not in html
+    )
+    numbers = [html.count(f'<td class="num muted">{n}</td>') for n in (1, 2, 3, 4)]
+    assert numbers == [2, 3, 2, 3]  # each number once in section 4; the moves between the wallets (2 and 4) on both sides in section 1
+    assert '<td>Sent</td><td>cold</td><td class="num">(0.00070000)</td><td class="num">(0.00001000)</td>' in html
+    assert '<td>Received</td><td>treasury</td><td class="num">0.00070000</td><td class="num"></td>' in html
     # no transaction identifier in the movements: the number of a movement finds it in section 4, once
     assert html.count(C) == 1 and html.index("The transactions") < html.index(C) and html.count("Proof of control of the scriptPubKey") == 1
     assert '<tr class="group"><td colspan="6">treasury</td></tr>' in html and html.count('<tr class="group">') == 1  # cold holds nothing
     # one wallet alone is still its own view: no transfer, no wallet column, no table of wallets
     alone = build_report(histories["treasury"], period_for_heights(nodes["treasury"], 1000, 1010), label="treasury", cli=None)
-    assert alone["wallets"] is None and "<th>Wallet</th>" not in render_html(alone) and 'class="wallets"' not in render_html(alone)
+    assert alone["wallets"] is None and "<h3>1.1 " not in render_html(alone) and 'class="wallets"' not in render_html(alone)
     with pytest.raises(ValueError, match="different chains"):
         merge_histories({"a": histories["treasury"], "b": History("test", None, 1, "00", "", [], [])})
     emptied = History(merged.chain, None, 900, "00" * 32, "2020-01-01T00:00:00Z", [], [])  # kept on file: its old tip does not cut
@@ -195,7 +224,9 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
     # the reader's document: each wallet a section, oldest first, the counterparty and the running balance, no txids, no proofs
     reader = (directory / f"company-{date}-history.html").read_text()
     assert "Transaction history" in reader and reader.index("1.</span> treasury") < reader.index("2.</span> cold")
-    assert "<th>Counterparty</th>" in reader and "<td>Received</td><td>Exchange</td>" in reader and "<td>Sent</td><td>cold</td>" in reader
+    assert "<th>Counterparty</th>" in reader and "<td>Received</td><td>Exchange</td>" in reader and '<th class="num">Fee</th>' in reader
+    assert '<td>Sent</td><td>cold</td><td class="num">(0.00070000)</td><td class="num">(0.00001000)</td>' in reader  # amount and fee apart
+    assert '<td>Received</td><td>treasury</td><td class="num">0.00070000</td><td class="num"></td>' in reader  # so the move pairs
     body = reader.split("</head>")[1]  # the shared style names the statement's colours; the document itself says nothing of proofs
     assert A not in body and B not in body and "proof" not in body.lower().replace("proofs of control", "") and "scriptPubKey" not in body
     assert (

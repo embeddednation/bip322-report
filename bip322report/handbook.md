@@ -137,11 +137,12 @@ may be left off the command inside its directory, with `holder = KEY` in
 `bip322.toml`, or when the tree has one holder. The wallets' histories merge: a transaction that moves coins from one of the holder's
 wallets to another is one movement of kind `transfer`, its fee the only
 cost, and the balance is the holder's total; the first page has a table of
-the wallets, each one's opening, received from others, sent to others,
-transfers between the holder's wallets (in less out: they cancel in the
-total), fees and closing, and the movements name the wallet beside the
-counterparty. The opening line cites the ledger in the tree that closed at
-this one's opening block, by label and reference, so the statements chain. Without a period the ledger runs from the block
+the wallets, each one's opening, received, sent, fees and closing, a move
+between two of them sent by the one and received by the other, and the
+movements are one block per wallet, the move one number on both sides for
+the same amount, the fee with the sender. The opening line cites the ledger
+in the tree that closed at this one's opening block, by label and reference,
+so the statements chain. Without a period the ledger runs from the block
 before the first transaction to the tip and is labelled by the tip's date;
 `--year` and the other period options work as for a wallet's statement. The
 CSV has the same six columns in one block per wallet, the wallet's name on a
@@ -157,8 +158,8 @@ Beside every statement, the wallet's or the holder's, goes
 `<name>-history.pdf`: the same movements for a reader who is not the
 auditor, a bank or a partner asked for the history. Each wallet is a section,
 oldest first, with the date, the kind in plain words, the counterparty, the
-amount and the running balance; no transaction identifiers, no proofs, no
-addresses. The statement with the proofs stays with the auditor, and the
+amount before the fee, the fee and the running balance; no transaction
+identifiers, no proofs, no addresses. The statement with the proofs stays with the auditor, and the
 two carry the same reference.
 
 Every history read from the node is kept in the wallet's directory as
@@ -315,10 +316,13 @@ script interpreter as a second engine; bip322-report is not needed to verify).
    through what was received, sent and paid in fees to the closing
    holdings, which are the holdings on the chain; the opening line names
    the statement before, whose closing holdings they were. For a holder, a
-   table of its wallets follows, transfers between them cancelling in the
-   total. One sentence says what is proven; any failed check appears
-   instead as ATTENTION with a checklist. Then the movements, numbered,
-   and the closing addresses with each proof's verdict. A joint
+   table of its wallets follows; a move between two of them is sent by the
+   one and received by the other, and the note under the table says how
+   much moved that way. One sentence says what is proven; any failed check
+   appears instead as ATTENTION with a checklist. Then the movements,
+   numbered, one block per wallet for a holder, a move between wallets one
+   number on both sides, and the closing addresses with each proof's
+   verdict. A joint
    transaction was funded by the wallet and by others: its fee is unknown
    and shown as such, its amount is the wallet's net.
 2. **Re-verify the proofs** on your own node:
