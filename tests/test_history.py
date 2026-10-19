@@ -72,7 +72,7 @@ def test_dust_the_wallet_spends_is_booked_where_it_is_spent(wallet):
     assert _rows(report) == [("b2", "swept", 500, None, 100_500), ("c3", "internal", 0, 200, 100_300)] and _exact(report)
     assert report["dust"]["count"] == 0 and (report["dust"]["swept_count"], report["dust"]["swept_sat"]) == (1, 500)
     html = render_html(report)
-    assert "dust swept" in html and "Dust the wallet spent in the period (1, 0.00000500 in all)" in html
+    assert "<td>Dust swept</td>" in html and "Dust the wallet spent in the period (1, 0.00000500 in all)" in html
     # a period that closes before the spend leaves the dust out, whatever later blocks hold: its figures never change
     early = _report(node, 980, 1000, dust_sat=1000)
     assert early["closing"]["total_sat"] == 100_000 == report["opening"]["total_sat"] and [c["txid"] for c in early["dust"]["coins"]] == [B]

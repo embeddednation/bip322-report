@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.24.0 (2026-10-19)
+
+One table on the first page: the opening holdings with each wallet's share
+under them, received, sent, fees, and the closing holdings with each
+wallet's share under them; the table of wallets with its sums is gone (the
+figures stay in the JSON). The number of a movement links to its transaction
+on the explorer and names it in the JSON; the list of transactions is gone,
+and the explainer is section 4 again.
+
 ## 0.23.0 (2026-10-19)
 
 The holder's movements one block per wallet, as in the reader's history,

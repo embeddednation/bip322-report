@@ -147,31 +147,25 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
         'Received from others</td><td class="num">0.00100000</td>' in html
         and 'Sent to others</td><td class="num">(0.00020000)</td>' in html
     )
-    assert (
-        '<td class="num">0.00149184</td><td class="num">(0.00070000)</td><td class="num">(0.00001184)</td><td class="num">0.00078000</td>'
-        in html
-    )
-    assert '<td class="num">0.00070000</td><td class="num">(0.00069184)</td><td class="num">(0.00000816)</td><td class="num">–</td>' in html
-    assert (
-        '<td class="num">0.00219184</td><td class="num">(0.00139184)</td><td class="num">(0.00002000)</td><td class="num">0.00078000</td>'
-        in html
-    )
-    assert "Received and sent include 0.00119184 moved between the holder's wallets" in html and "Transfers" not in html
-    assert (
-        html.index("1.1 treasury</h3>") < html.index("1.2 cold</h3>")
-        and html.count("<th>Wallet</th>") == 1
-        and "<td>Transfer</td>" not in html
-    )
+    # each wallet's share under the opening and under the closing holdings; no sums per wallet on the page (the JSON has them)
+    assert html.count('<tr class="sub"><td class="sub">treasury</td><td class="num">–</td>') == 1  # opening: nothing yet
+    assert html.count('<tr class="sub"><td class="sub">cold</td><td class="num">–</td>') == 2  # opening and closing: nothing
+    assert '<tr class="sub"><td class="sub">treasury</td><td class="num">0.00078000</td>' in html  # closing: everything
+    assert html.index("Opening holdings") < html.index('<td class="sub">cold</td>') < html.index("Closing holdings")
+    assert "<th>Wallet</th>" not in html and "Transfers" not in html and "0.00149184" not in html and "<td>Transfer</td>" not in html
+    assert html.index("1.1 treasury</h3>") < html.index("1.2 cold</h3>")
     numbers = [html.count(f'<td class="num muted">{n}</td>') for n in (1, 2, 3, 4)]
-    assert numbers == [2, 3, 2, 3]  # each number once in section 4; the moves between the wallets (2 and 4) on both sides in section 1
+    assert numbers == [1, 2, 1, 2]  # the moves between the wallets (2 and 4) on both sides, nothing else numbered
     assert '<td>Sent</td><td>cold</td><td class="num">(0.00070000)</td><td class="num">(0.00001000)</td>' in html
     assert '<td>Received</td><td>treasury</td><td class="num">0.00070000</td><td class="num"></td>' in html
-    # no transaction identifier in the movements: the number of a movement finds it in section 4, once
-    assert html.count(C) == 1 and html.index("The transactions") < html.index(C) and html.count("Proof of control of the scriptPubKey") == 1
+    # no transaction identifier in the movements, and no list of them: the number links to the transaction when an explorer is named
+    assert C not in html and "The transactions" not in html and html.count("Proof of control of the scriptPubKey") == 1
+    linked = render_html(report, explorer="https://x")
+    assert linked.count(f'<a class="n" href="https://x/tx/{C}?showDetails=true" title="{C}">3</a>') == 1 and linked.count(C) == 2
     assert '<tr class="group"><td colspan="6">treasury</td></tr>' in html and html.count('<tr class="group">') == 1  # cold holds nothing
     # one wallet alone is still its own view: no transfer, no wallet column, no table of wallets
     alone = build_report(histories["treasury"], period_for_heights(nodes["treasury"], 1000, 1010), label="treasury", cli=None)
-    assert alone["wallets"] is None and "<h3>1.1 " not in render_html(alone) and 'class="wallets"' not in render_html(alone)
+    assert alone["wallets"] is None and "<h3>1.1 " not in render_html(alone) and '<tr class="sub">' not in render_html(alone)
     with pytest.raises(ValueError, match="different chains"):
         merge_histories({"a": histories["treasury"], "b": History("test", None, 1, "00", "", [], [])})
     emptied = History(merged.chain, None, 900, "00" * 32, "2020-01-01T00:00:00Z", [], [])  # kept on file: its old tip does not cut

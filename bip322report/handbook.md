@@ -136,11 +136,11 @@ other key there is a default for the holder's wallets. The holder
 may be left off the command inside its directory, with `holder = KEY` in
 `bip322.toml`, or when the tree has one holder. The wallets' histories merge: a transaction that moves coins from one of the holder's
 wallets to another is one movement of kind `transfer`, its fee the only
-cost, and the balance is the holder's total; the first page has a table of
-the wallets, each one's opening, received, sent, fees and closing, a move
-between two of them sent by the one and received by the other, and the
-movements are one block per wallet, the move one number on both sides for
-the same amount, the fee with the sender. The opening line cites the ledger
+cost, and the balance is the holder's total; the first page lists each
+wallet's share under the opening and under the closing holdings, and the
+movements are one block per wallet, a move between two of them sent by the
+one and received by the other under one number on both sides for the same
+amount, the fee with the sender. The opening line cites the ledger
 in the tree that closed at this one's opening block, by label and reference,
 so the statements chain. Without a period the ledger runs from the block
 before the first transaction to the tip and is labelled by the tip's date;
@@ -315,10 +315,8 @@ script interpreter as a second engine; bip322-report is not needed to verify).
 1. **Read the statement.** Page 1: the summary, from the opening holdings
    through what was received, sent and paid in fees to the closing
    holdings, which are the holdings on the chain; the opening line names
-   the statement before, whose closing holdings they were. For a holder, a
-   table of its wallets follows; a move between two of them is sent by the
-   one and received by the other, and the note under the table says how
-   much moved that way. One sentence says what is proven; any failed check
+   the statement before, whose closing holdings they were. For a holder,
+   each wallet's share is listed under both. One sentence says what is proven; any failed check
    appears instead as ATTENTION with a checklist. Then the movements,
    numbered, one block per wallet for a holder, a move between wallets one
    number on both sides, and the closing addresses with each proof's
@@ -334,10 +332,11 @@ script interpreter as a second engine; bip322-report is not needed to verify).
    output: `bip322 verifymessage <scriptPubKey> <proof> "<message>"` once,
    and `bip322 audit holdings <txid>:<vout> --at <block>` for each UTXO at
    the address. Paste them as they stand; the backslashes continue the
-   lines. Section 4 gives every movement's transaction by its number. For a second opinion on a
+   lines. A movement's number links to its transaction on the explorer and
+   names it in the JSON (`n` on each movement). For a second opinion on a
    proof, the reference checks in the bip322-core repository run other implementations beside the
    verifier.
-4. **Read section 5** for what a proof shows: that at the block named the
+4. **Read section 4** for what a proof shows: that at the block named the
    holder could produce a valid spend from the scriptPubKey, which is what
    controlling the UTXOs locked to it means; not who owns the coins, not
    what liabilities stand against them, nothing about any later time.

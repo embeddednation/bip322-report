@@ -643,9 +643,10 @@ def test_one_page_per_address_and_the_transactions_by_number(wallet):
     assert html.count("Proof of control of the scriptPubKey") == 2 and html.count('<td class="k">utxo</td>') == 3
     assert "2 UTXOs, 0.75000000 BTC, received 2023-11-" in html and "3.1</td>" in html and "3.2</td>" in html
     assert "The closing UTXO" not in html  # no proofs here: ATTENTION, and no sentence saying what is proven
-    rows = html.split("The transactions")[1]
-    assert rows.count("aa" * 32) == 1 and rows.count("bb" * 32) == 1 and html.split("Holdings at the end")[0].count("aa" * 32) == 0
-    assert ">1</td><td>2023-11-" in rows and ">2</td><td>2023-11-" in rows
+    movements = html.split("Holdings at the end")[0]
+    assert "aa" * 32 not in movements and '<td class="num muted">2</td><td>2023-11-' in movements  # numbered, no txid
+    linked = render_html(report, explorer="https://x").split("Holdings at the end")[0]
+    assert f'<a class="n" href="https://x/tx/{"bb" * 32}?showDetails=true" title="{"bb" * 32}">2</a>' in linked
 
 
 def test_the_statement_before_is_the_one_that_closed_at_the_opening_block(tmp_path):
