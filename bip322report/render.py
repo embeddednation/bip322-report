@@ -244,6 +244,7 @@ def _env() -> Environment:
     env.filters["acct"] = _acct
     env.filters["paren"] = lambda text: "–" if _nil(text) else f"({text})"  # a sum that is subtracted: in parentheses, a dash for nothing
     env.filters["nil"] = lambda text: "–" if _nil(text) else str(text)  # a dash for nothing, in a table of sums
+    env.filters["chunks"] = _chunks
     env.filters["breakable"] = _breakable
     env.filters["hl"] = _highlight
     env.filters["utc"] = lambda iso: (str(iso).replace("T", " ").replace("Z", " UTC")) if iso else ""
@@ -255,6 +256,12 @@ def _acct(text) -> str:
     if text is None:
         return ""
     return f"({text[1:]})" if str(text).startswith("-") else str(text)
+
+
+def _chunks(value: str) -> Markup:
+    """A hash with a break opportunity every eight characters: it wraps in groups in a narrow column and copies whole."""
+    text = str(value)
+    return Markup("<wbr>").join(escape(text[i : i + 8]) for i in range(0, len(text), 8))
 
 
 def _nil(text) -> bool:

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.27.0 (2026-10-20)
+
+One category per column. A movement's transaction id has a column of its
+own, in a smaller type, wrapping between its eight-character groups and
+copying whole; the currency's value sits under the BTC amount instead of in
+a column; the date keeps its two lines. The holdings start on a page of
+their own, with the UTXO's id in its own column and the last column named
+Section. Requires bip322-audit 0.21, whose `checksigners` takes a snapshot
+as `finalize` does; the handbook says so.
+
 ## 0.26.0 (2026-10-20)
 
 The UTXO is the unit of sections 2 and 3 again, and a movement carries its

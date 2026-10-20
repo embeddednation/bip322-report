@@ -198,16 +198,17 @@ has a table of the holder's wallets and names the wallet in each movement.
 * The movements, in the style of a bank statement, one block per wallet for
   a holder: each transaction with its date, its kind in words
   (Received, Sent, Internal move, Joint transaction, Dust swept), the
-  counterparty, the amount before the fee, the fee and the wallet's running
-  balance, and under them the id of its transaction, whole and linked to
-  the explorer; opening and closing rows. A move between two of the holder's
+  counterparty, the amount before the fee (the currency's value under it),
+  the fee and the wallet's running balance, the id of its transaction whole
+  in a column of its own, linked to the explorer; opening and closing rows.
+  A move between two of the holder's
   wallets appears in both blocks under the same transaction, sent by the one
   and received by the other for the same amount, the fee with the sender.
-* Holdings at the end of the period: one row per UTXO (a holder's grouped
-  by wallet) with when it arrived, the amount, the proof's verdict and
-  block, the page of section 3 that shows it, and its id, `txid:vout`,
-  whole: the transaction that created it is among the movements. Then one
-  page per UTXO in two steps, each
+* Holdings at the end of the period, on a page of its own: one row per
+  UTXO (a holder's grouped by wallet) with its id, `txid:vout`, whole, when
+  it arrived, the amount, the proof's verdict and block, and the section
+  that shows it; the transaction that created it is among the movements.
+  Then one page per UTXO in two steps, each
   a pasteable command with what it printed. *Proof of control of the scriptPubKey*: the address, its
   scriptPubKey, message, proof, and
   `bip322 verifymessage <scriptPubKey> ...` with its verdict. *On the

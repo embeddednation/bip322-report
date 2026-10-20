@@ -91,14 +91,8 @@
   table.summary tbody tr:last-child td { border-bottom: 3px double var(--rule-strong); }
   p.proven { font-family: var(--font-label); margin: 10px 0 16px; }
 
-  /* the movements and the holdings: a row of two lines, the id of the transaction or the UTXO under the figures */
-  table.moves tbody tr td { background: var(--bg); }
-  table.moves tbody.alt tr td { background: var(--zebra); }
-  table.moves tbody.row { break-inside: avoid; }
-  table.moves tbody.row tr:first-child td { border-bottom: 0; padding-bottom: 1px; }
-  table.moves tbody.row tr:first-child td.d { border-bottom: 1px solid var(--rule); }
-  table.moves tr.id td { padding-top: 0; }
-  table.moves tr.id .mono { font-size: 7pt; }
+  /* a transaction's or a UTXO's id in a column of its own: smaller, wrapped only between its eight-character groups */
+  td.id .mono { font-size: 7pt; overflow-wrap: normal; word-break: normal; }
   tr.group td { background: var(--bg) !important; font-weight: 600; color: var(--strong); padding-top: 8px; border-bottom: 1px solid var(--rule-strong); }
 
   /* a UTXO's page: tables of a name and its value, without stripes */

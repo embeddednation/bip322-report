@@ -219,8 +219,10 @@ the snapshot's `signed/` directory under any names (`to_sign-01-A.psbt`,
 enough signatures; signing the unsigned copy on each avoids the question.
 `finalize` combines them. The message template is checked against what
 signing devices can display (`bip322 lint-message`). Before the first
-finalize of a new device set, `bip322 checksigners signed/*.psbt` verifies
-each cosigner's signature alone and every threshold combination.
+finalize of a new device set, `bip322 audit checksigners` verifies each
+cosigner's signature alone and every threshold combination over the
+snapshot's PSBTs (`bip322 checksigners FILE...` does the same for loose
+files).
 
 ### Finalize, verify, report
 

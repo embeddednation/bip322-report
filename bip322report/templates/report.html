@@ -16,7 +16,10 @@
   {% if explorer %}<a class="mono hl-script" href="{{ explorer }}/address/{{ a }}">{{ a }}</a>{% else %}<span class="mono hl-script">{{ a }}</span>{% endif %}
 {%- endmacro %}
 {% macro yesno(v) -%}{% if v %}<span class="ok">✓</span>{% else %}<span class="bad">✗</span>{% endif %}{%- endmacro %}
-{% macro utxo(o) -%}<span class="mono hl-utxo">{{ tx(o.txid, "hl-utxo") }}:{{ o.vout }}</span>{%- endmacro %}
+{% macro txid(t, role="") -%}
+  {% if explorer %}<a class="mono {{ role }}" href="{{ explorer }}/tx/{{ t }}?showDetails=true">{{ t | chunks }}</a>{% else %}<span class="mono {{ role }}">{{ t | chunks }}</span>{% endif %}
+{%- endmacro %}
+{% macro utxo(o) -%}<span class="mono hl-utxo">{{ txid(o.txid, "hl-utxo") }}:{{ o.vout }}</span>{%- endmacro %}
 <span class="meta" data-generated="{{ r.generated_utc }}" data-ref="{{ r.report_id }}"></span>
 
 <div class="head">
@@ -86,51 +89,45 @@
 {% endif %}
 
 <h2><span class="n">1.</span> Movements in the period</h2>
-{% set span = 6 if r.fiat else 5 %}{# the columns after the date: what a transaction's id spans #}
 {% for b in blocks %}
 <div class="keep">
 {% if r.wallets %}<h3>1.{{ loop.index }} {{ b.name }}</h3>{% endif %}
 {% if b.transactions %}
-<table class="moves">
-  <colgroup><col style="width:11%"><col style="width:11%"><col><col style="width:12%"><col style="width:12%"><col style="width:12%">{% if r.fiat %}<col style="width:12%">{% endif %}</colgroup>
-  <thead><tr><th>Date (UTC)</th><th>Kind</th><th>Counterparty</th><th class="num">Amount</th><th class="num">Fee</th><th class="num">Balance</th>{% if r.fiat %}<th class="num">Amount {{ r.fiat.currency }}</th>{% endif %}</tr></thead>
-  <tbody><tr class="open"><td colspan="5">Opening balance, {{ r.period.start.time_utc | utc }}</td><td class="num">{{ b.opening_btc }}</td>{% if r.fiat %}<td></td>{% endif %}</tr></tbody>
-  {% for t in b.transactions %}
-  <tbody class="row{% if loop.index is even %} alt{% endif %}">
-  <tr><td class="d" rowspan="2">{{ t.time_utc[:10] }}<br><span class="muted">{{ t.time_utc[11:19] }}</span></td>
-      <td>{{ kinds.get(t.kind, t.kind) }}</td><td>{{ t.counterpart }}</td><td class="num">{% if t.amount_sat %}{{ t.amount_btc | acct }}{% endif %}</td><td class="num">{% if t.kind == "mixed" %}<span class="muted">unknown</span>{% elif t.fee_btc %}({{ t.fee_btc }}){% endif %}</td><td class="num">{{ t.balance_after_btc }}</td>
-    {% if r.fiat %}<td class="num">{{ (t.fiat.amount | acct) if t.fiat.amount and t.amount_sat else "" }}</td>{% endif %}</tr>
-  <tr class="id"><td colspan="{{ span }}">{{ tx(t.txid, "muted") }}</td></tr>
-  </tbody>
-  {% endfor %}
+<table>
+  <colgroup><col style="width:23%"><col style="width:11%"><col style="width:10%"><col><col style="width:12%"><col style="width:12%"><col style="width:12%"></colgroup>
+  <thead><tr><th>Txid</th><th>Date (UTC)</th><th>Kind</th><th>Counterparty</th><th class="num">Amount{% if r.fiat %}<br><span class="muted">{{ r.fiat.currency }}</span>{% endif %}</th><th class="num">Fee</th><th class="num">Balance</th></tr></thead>
   <tbody>
-  <tr class="total"><td colspan="4">Closing balance, {{ r.period.end.time_utc | utc }}{% if not r.wallets %} · the holdings of section 2{% endif %}</td><td class="num">{{ b.amount_btc | acct }}</td><td class="num">({{ b.fees_btc }})</td><td class="num">{{ b.closing_btc }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
+  <tr class="open"><td colspan="6">Opening balance, {{ r.period.start.time_utc | utc }}</td><td class="num">{{ b.opening_btc }}</td></tr>
+  {% for t in b.transactions %}
+  <tr><td class="id">{{ txid(t.txid) }}</td><td>{{ t.time_utc[:10] }}<br><span class="muted">{{ t.time_utc[11:19] }}</span></td>
+      <td>{{ kinds.get(t.kind, t.kind) }}</td><td>{{ t.counterpart }}</td><td class="num">{% if t.amount_sat %}{{ t.amount_btc | acct }}{% if r.fiat and t.fiat.amount %}<br><span class="muted">{{ t.fiat.amount | acct }}</span>{% endif %}{% endif %}</td><td class="num">{% if t.kind == "mixed" %}<span class="muted">unknown</span>{% elif t.fee_btc %}({{ t.fee_btc }}){% endif %}</td><td class="num">{{ t.balance_after_btc }}</td></tr>
+  {% endfor %}
+  <tr class="total"><td colspan="4">Closing balance, {{ r.period.end.time_utc | utc }}{% if not r.wallets %} · the holdings of section 2{% endif %}</td><td class="num">{{ b.amount_btc | acct }}</td><td class="num">({{ b.fees_btc }})</td><td class="num">{{ b.closing_btc }}</td></tr>
   {% if not r.wallets and not r.reconciliation.ok %}
-  <tr><td colspan="6" class="bad">Difference between the running balance and the holdings on the chain</td><td class="num bad">{{ r.reconciliation.diff_sat | btc | acct }}</td>{% if r.fiat %}<td></td>{% endif %}</tr>
+  <tr><td colspan="6" class="bad">Difference between the running balance and the holdings on the chain</td><td class="num bad">{{ r.reconciliation.diff_sat | btc | acct }}</td></tr>
   {% endif %}
   </tbody>
 </table>
 {% else %}<p class="small muted">No transactions in the period: the closing balance, {{ b.closing_btc }}, equals the opening balance{% if not r.wallets and not r.reconciliation.ok %} <span class="bad">but the holdings on the chain differ by {{ r.reconciliation.diff_sat | btc | acct }}</span>{% endif %}.</p>{% endif %}
 </div>
 {% endfor %}
-<p class="small muted">{% if r.wallets %}The wallets' closing balances add up to the closing holdings of section 2, {{ r.closing.total_btc }}{% if not r.reconciliation.ok %}; <span class="bad">the running balances differ from the holdings on the chain by {{ r.reconciliation.diff_sat | btc | acct }}</span>{% endif %}. A move between the holder's wallets appears in both, under the same transaction: sent by the one, received by the other, the fee with the sender. {% endif %}Under each movement, the id of its transaction{% if explorer %}, linked to the explorer{% endif %}; a UTXO of section 2 is named by the transaction that created it.{% if r.totals.mixed_count %} A joint transaction was funded by others too: its fee is unknown and its amount is the {{ who }}'s net.{% endif %}{% if r.fiat %} {{ r.fiat.currency }} at the rate in force on the transaction's day.{% endif %}</p>
+<p class="small muted">{% if r.wallets %}The wallets' closing balances add up to the closing holdings of section 2, {{ r.closing.total_btc }}{% if not r.reconciliation.ok %}; <span class="bad">the running balances differ from the holdings on the chain by {{ r.reconciliation.diff_sat | btc | acct }}</span>{% endif %}. A move between the holder's wallets appears in both, under the same transaction: sent by the one, received by the other, the fee with the sender. {% endif %}Each movement carries the id of its transaction whole{% if explorer %}, linked to the explorer{% endif %}; a UTXO of section 2 is named by the transaction that created it.{% if r.totals.mixed_count %} A joint transaction was funded by others too: its fee is unknown and its amount is the {{ who }}'s net.{% endif %}{% if r.fiat %} {{ r.fiat.currency }} under each amount, at the rate in force on the transaction's day.{% endif %}</p>
 
-<div class="keep">
+<div class="page">
 <h2><span class="n">2.</span> Holdings at the end of the period · {{ r.period.end.time_utc | utc }}</h2>
 {% if pages %}
-<table class="moves">
-  <colgroup><col style="width:17%"><col class="w-btc"><col><col style="width:6%"></colgroup>
-  <thead><tr><th>Received</th><th class="num">Amount</th><th>Proof of control</th><th class="num">Page</th></tr></thead>
+<table>
+  <colgroup><col style="width:32%"><col style="width:11%"><col class="w-btc"><col><col style="width:8%"></colgroup>
+  <thead><tr><th>UTXO</th><th>Received</th><th class="num">Amount</th><th>Proof of control</th><th class="num">Section</th></tr></thead>
+  <tbody>
   {% for p in pages %}{% set o = p.o %}{% set a = p.a %}
-  {% if r.wallets and (loop.first or o.wallet != loop.previtem.o.wallet) %}<tbody><tr class="group"><td colspan="4">{{ o.wallet }}</td></tr></tbody>{% endif %}
-  <tbody class="row{% if loop.index is even %} alt{% endif %}">
-  <tr><td>{{ o.created_utc[:10] if o.created_utc }}</td><td class="num">{{ o.amount_btc }}</td>
+  {% if r.wallets and (loop.first or o.wallet != loop.previtem.o.wallet) %}<tr class="group"><td colspan="5">{{ o.wallet }}</td></tr>{% endif %}
+  <tr><td class="id">{{ utxo(o) }}</td><td>{{ o.created_utc[:10] if o.created_utc }}</td><td class="num">{{ o.amount_btc }}</td>
       <td>{% if not a.proof %}<span class="bad">NO PROOF</span>{% elif a.proof.verified %}<span class="ok">valid</span> · block {{ a.proof.stamp.height }}{% if p.before %} · before the UTXO{% endif %}{% else %}<span class="bad">{{ a.proof.state | upper }}</span> · block {{ a.proof.stamp.height }}{% endif %}</td>
       <td class="num">3.{{ p.n }}</td></tr>
-  <tr class="id"><td colspan="4">{{ utxo(o) }}</td></tr>
-  </tbody>
   {% endfor %}
-  <tbody><tr class="total"><td>Closing holdings</td><td class="num">{{ r.closing.total_btc }}</td><td colspan="2">{{ pages | length }} UTXO{{ "s" if pages | length != 1 }}</td></tr></tbody>
+  <tr class="total"><td>Closing holdings</td><td></td><td class="num">{{ r.closing.total_btc }}</td><td colspan="2">{{ pages | length }} UTXO{{ "s" if pages | length != 1 }}</td></tr>
+  </tbody>
 </table>
 <p class="small muted">One page per UTXO follows: the proof of control of its scriptPubKey, then the chain's record of the UTXO at the block of the proof.</p>
 {% elif r.dust.count %}<p class="small muted">Nothing but dust at the end of the period (see the notes): nothing to prove.</p>{% else %}<p class="small muted">No holdings at the end of the period: nothing to prove.</p>{% endif %}
