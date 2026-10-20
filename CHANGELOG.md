@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.30.1 (2026-10-20)
+
+Review of 0.30.0. The listunspent cross-check is back: each loaded wallet's
+node wallet is checked against that wallet's closing coins and the results
+are one `node_check`, whose `wallets` lists the wallets checked; 0.30.0 ran
+none, where the per-wallet statement had. A holder of one wallet read from
+its kept history says so in the notes (`history kept`), as the share rows
+did for several. A wallet that is not loaded and has no kept history is
+refused with the two remedies, not the node's bare error. `-w` is no
+longer an option of the statement itself; before the command it is still
+refused with the message. `dust`, `theme`, `heading` and `explorer` in a
+`[wallets.NAME]` table are not read by the statement, which is the
+holder's: it says so on stderr, and the docs say where they go. The
+`history` command's help no longer sends its file to the statement, and the
+command refuses a tree laid out as before bip322-audit 0.22 instead of
+silently not keeping the file. The JSON loses `holder`, null since 0.30.0
+(`label` is the holder's name). The tree is read once per statement. The
+docs name the fifth file in the statement directory, the reader's history
+PDF, and say that a holder named like a command is given as `report NAME`.
+
 ## 0.30.0 (2026-10-20)
 
 The statement is the holder's. `bip322 report [HOLDER]` is what `bip322

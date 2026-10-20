@@ -12,7 +12,6 @@ in ``bip322.toml``, else the tree's one.  ``-w`` names a wallet for ``history`` 
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import sys
 from pathlib import Path
@@ -22,13 +21,13 @@ from bip322audit.datadir import (
     HISTORY_FILE,
     Config,
     ConfigError,
+    find_data_dir,
     holder_dir,
     holder_of_cwd,
     holder_statements_dir,
     holders,
     name_wallet,
     use_data_dir,
-    wallet_dir,
     wallet_dirs,
     wallet_of_cwd,
     wallets,
@@ -53,6 +52,7 @@ from .report import build_report, format_summary, previous_statement
 EXPLORER = "https://mempool.space"  # mainnet only: on another chain its links would lead to the wrong transactions
 DUST_MAX = 10_000  # satoshi; a higher --dust would leave real coins out of the statement, so it needs --dust-force
 DEFAULT_THEME = "journal"
+STATEMENT_KEYS = ("dust", "theme", "heading", "explorer")  # the statement's own settings: the holder's table or the top level
 
 
 def _opt(args, name: str):
@@ -93,10 +93,11 @@ def _names(args, config: Config, history: History, period: Period, own: list[str
     return name_by_wallets(counterparts(history.between(period.start.height, period.end.height)), config.addresses, others, _progress)
 
 
-def _add_node_args(p: argparse.ArgumentParser) -> None:
-    """The global options again, so that they may follow the command as well as precede it."""
+def _add_node_args(p: argparse.ArgumentParser, *, wallet: bool = True) -> None:
+    """The global options again, so that they may follow the command as well as precede it; ``-w`` only where a wallet is meant."""
     p.add_argument("--cli", dest="cli_sub", metavar="CMD", help="how to reach the node (may also be given before the command)")
-    p.add_argument("--wallet", "-w", dest="wallet_sub", metavar="NAME", help="the wallet (may also be given before the command)")
+    if wallet:
+        p.add_argument("--wallet", "-w", dest="wallet_sub", metavar="NAME", help="the wallet (may also be given before the command)")
     p.add_argument("--dir", dest="dir_sub", metavar="DIR", help="the data directory (may also be given before the command)")
 
 
@@ -111,21 +112,20 @@ def _history(args, cli: BitcoinCli) -> History:
 
 
 def _saved_history(wallet: str) -> Path | None:
-    """The wallet's ``history.json`` in the tree, when the wallet is a wallet of the tree."""
-    with contextlib.suppress(ConfigError):
-        path = wallet_dirs().get(wallet)
-        if path is not None:
-            return path / HISTORY_FILE
-    return None
+    """The wallet's ``history.json`` in the tree, when the wallet is a wallet of the tree; None outside a tree.
+
+    A tree laid out as earlier versions did is an error here as everywhere: silently not keeping the file would cost the wallet
+    its only way into a statement once unloaded.
+    """
+    if find_data_dir() is None:
+        return None
+    path = wallet_dirs().get(wallet)
+    return path / HISTORY_FILE if path is not None else None
 
 
-def _save_history(wallet: str, history: History, *, member_only: bool) -> None:
-    """Keep the history read from the node in the wallet's directory; with ``member_only``, only when the directory is there already."""
-    with contextlib.suppress(ConfigError):
-        if not member_only or wallet in wallet_dirs():
-            directory = wallet_dir(wallet)
-            directory.mkdir(parents=True, exist_ok=True)
-            write_text_atomic(directory / HISTORY_FILE, json.dumps(history.to_dict(), indent=2) + "\n")
+def _keep_history(directory: Path, history: History) -> None:
+    """The history read from the node, kept in the wallet's directory for when the wallet is not loaded any more."""
+    write_text_atomic(directory / HISTORY_FILE, json.dumps(history.to_dict(), indent=2) + "\n")
 
 
 def _wallet_history(args, config: Config, wallet: str | None, cli: BitcoinCli) -> tuple[History, dict]:
@@ -135,9 +135,14 @@ def _wallet_history(args, config: Config, wallet: str | None, cli: BitcoinCli) -
     try:
         history = fetch_history(cli, progress=_progress)
     except RpcError as exc:
-        path = _saved_history(wallet) if wallet is not None and "not loaded" in str(exc) else None
-        if path is None or not path.is_file():
+        if wallet is None or "not loaded" not in str(exc):
             raise
+        path = _saved_history(wallet)
+        if path is None or not path.is_file():
+            raise CLIError(
+                f"{wallet} is not loaded on the node, and no history is kept in its directory: load it once (a statement keeps "
+                f"the history it reads), or move its directory out from under the holder's"
+            ) from exc
         history = History.load(path)
         held = history.balance_at(history.tip_height)
         if held:
@@ -204,7 +209,7 @@ def _period_label(args) -> str:
     return f"{args.from_height}..{args.to_height}"
 
 
-def _proofs_roots(args, members: list[str]) -> list[Path]:
+def _proofs_roots(args, directories: list[Path]) -> list[Path]:
     """Where the proofs come from: the --snapshots paths, each holding a snapshot, or the holder's wallets' directories.
 
     A mistyped --snapshots path must not look like a wallet without proofs.
@@ -217,7 +222,7 @@ def _proofs_roots(args, members: list[str]) -> list[Path]:
             if not find_proofs([root]) and not pending_snapshots([root]):  # snapshots awaiting signatures count
                 raise CLIError(f"--snapshots {root}: no proofs file in it")
     else:
-        roots = [wallet_dir(w) for w in members]
+        roots = directories
     proofs_names([path for path, _ in find_proofs(roots)])  # refuses two files under one name before any work
     return roots
 
@@ -256,8 +261,9 @@ def cmd_history(args) -> int:
     history = fetch_history(_cli(args, config, wallet), progress=_progress)
     if wallet is None and history.wallet is not None:
         wallet = config.wallet_of_node(str(history.wallet))
-    if wallet is not None:
-        _save_history(wallet, history, member_only=True)  # a wallet of the tree keeps it, for when it is not loaded any more
+    path = _saved_history(wallet) if wallet is not None else None
+    if path is not None:
+        _keep_history(path.parent, history)  # a wallet of the tree keeps it, for when it is not loaded any more
     emit(json.dumps(history.to_dict(), indent=2), args.output)
     print(
         json.dumps(
@@ -367,18 +373,25 @@ def cmd_report(args) -> int:
                 "which holder? bip322 report HOLDER" + (f" (holders here: {', '.join(found)})" if found else ": none in the tree yet")
             )
         key = found[0]
-    members = sorted(w for w, path in wallet_dirs().items() if path.parent.name == key) if key in found else []
+    paths = {w: p for w, p in wallet_dirs().items() if p.parent.name == key} if key in found else {}  # the tree, read once
+    members = sorted(paths)
     if not members:
         raise CLIError(
             f"no wallet under {holder_dir(key)} yet: the first snapshot of a wallet under it makes it"
             + (f" (holders here: {', '.join(found)})" if found else "")
         )
+    for w in members:
+        stray = [k for k in STATEMENT_KEYS if k in config.wallets.get(w, {})]
+        if stray:
+            _progress(
+                f"note: {', '.join(stray)} in [wallets.{w}] is not read by the statement, which is the holder's: set it in [holders.{key}]"
+            )
     period_label = _period_label(args) if _period_given(args) else None
     dust = _dust(args, config, None, holder=key)
     rates = _rates(args)
     theme = _theme(args, config, None, holder=key)
     pdf = not args.html and _pdf_possible()
-    roots = _proofs_roots(args, members)  # a given path is checked before any work
+    roots = _proofs_roots(args, [paths[w] for w in members])  # a given path is checked before any work
     if args.output:
         _check_directory(Path(args.output), args.force)
     elif period_label:
@@ -390,10 +403,11 @@ def cmd_report(args) -> int:
         _progress(f"{w}: reading the history")
         histories[w], sources[w] = _wallet_history(args, config, w, _cli(args, config, w))
         if sources[w]["source"] == "node":
-            _save_history(w, histories[w], member_only=True)
+            _keep_history(paths[w], histories[w])
     history = merge_histories(histories)
-    loaded = [w for w in members if sources[w]["source"] == "node"]  # any one node for the chain-level work: the proofs, the UTXO lookups
-    cli = _cli(args, config, loaded[0]) if loaded else _cli(args, config, members[0], rpcwallet=False)
+    loaded = [w for w in members if sources[w]["source"] == "node"]
+    node_clis = {w: _cli(args, config, w) for w in loaded}  # each loaded wallet's node wallet: the listunspent check is per wallet
+    cli = node_clis[loaded[0]] if loaded else _cli(args, config, members[0], rpcwallet=False)  # any one node for the chain-level work
     period = _period(args, cli, history, period_label) if period_label else _whole_life(cli, history)
     names = _names(args, config, history, period, members)
     directory = Path(args.output) if args.output else holder_statements_dir(key) / period.label
@@ -411,7 +425,7 @@ def cmd_report(args) -> int:
         addresses=names,
         wallets=members,
         sources=sources,
-        node_check=False,
+        node_clis=node_clis,
     )
     report["previous"] = previous_statement(holder_statements_dir(key), report)
     return _write_statement(args, config, key, report, directory, f"{key}-{period.label}", roots, history.chain, theme, pdf)
@@ -550,11 +564,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "history",
-        help="the node wallet's transaction history as JSON (a cache for balance and report)",
+        help="the node wallet's transaction history as JSON, kept in the wallet's directory when it is a wallet of the tree",
         description=(
             "Read every transaction of the node wallet (listtransactions, gettransaction, getaddressinfo) and resolve the wallet's side of each: "
             "outputs to the wallet, the wallet's outputs spent, outputs to outside, the exact fee. No index is needed. "
-            "balance and report take the result with --history so they can run without the wallet, or repeatably on the same data."
+            "balance takes the result with --history; the statement reads a wallet the node has not loaded from the history.json "
+            "kept in its directory, which this writes for a wallet of the tree, so a wallet about to be unloaded gets this run once."
         ),
     )
     _add_node_args(p)
@@ -597,9 +612,10 @@ def build_parser() -> argparse.ArgumentParser:
         "key",
         metavar="HOLDER",
         nargs="?",
-        help="the holder: its directory in the data directory (default: the current directory's holder, holder in bip322.toml, else the tree's one)",
+        help="the holder: its directory in the data directory (default: the current directory's holder, holder in bip322.toml, else the "
+        "tree's one); one named like a command (history, block, balance, handbook, help) is given as: report NAME",
     )
-    _add_node_args(p)
+    _add_node_args(p, wallet=False)
     _add_period_args(p)
     p.add_argument(
         "--snapshots",

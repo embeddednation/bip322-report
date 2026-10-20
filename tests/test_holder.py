@@ -265,6 +265,10 @@ def test_the_statement_is_the_holders(wallet, tmp_path, monkeypatch, capsys):
     ]
     assert blocks["treasury"][-1]["balance"] == "0.00078000" and blocks["cold"][-1]["balance"] == "0.00000000"
     assert [w["history"]["source"] for w in written["wallets"]] == ["node", "node"]
+    # the node check is per wallet, each node wallet against its own closing coins, the results as one
+    assert written["node_check"]["ok"] is True and written["node_check"]["wallets"] == ["cold", "treasury"]
+    assert written["node_check"]["closing_count"] == written["node_check"]["listunspent_count"] == 1
+    assert "<td>Node wallet agrees with the closing UTXOs</td>" in (directory / f"company-{date}.html").read_text()  # the checklist, 1 of 1
     # the histories read are kept in the wallets' directories, for when a wallet is not loaded any more
     assert (root / "company" / "treasury" / "history.json").is_file() and (root / "company" / "cold" / "history.json").is_file()
     cold_node, treasury_node = nodes.pop("cold"), nodes["treasury"]  # cold unloaded: its kept history serves, it held nothing at its tip
@@ -276,8 +280,18 @@ def test_the_statement_is_the_holders(wallet, tmp_path, monkeypatch, capsys):
     written = json.loads((tmp_path / "kept" / f"company-{date2}.json").read_text())
     assert written["period"]["end"]["height"] == 1012 and [w["history"]["source"] for w in written["wallets"]] == ["node", "file"]
     assert [w["history"]["tip_height"] for w in written["wallets"]] == [1012, 1010]
+    assert written["node_check"]["ok"] is True and written["node_check"]["wallets"] == ["treasury"]  # the loaded one
     assert csv_blocks(tmp_path / "kept" / f"company-{date2}.csv") == blocks
     assert "history kept " in (tmp_path / "kept" / f"company-{date2}.html").read_text()
+    # a wallet neither loaded nor kept: refused with the remedies, not the node's bare error
+    (root / "company" / "cold" / "history.json").rename(tmp_path / "cold-history.json")
+    assert cli_module.main(["report", "-o", str(tmp_path / "unkept")]) == 2
+    err = capsys.readouterr().err
+    assert (
+        "cold is not loaded on the node, and no history is kept in its directory: load it once" in err
+        and not (tmp_path / "unkept").exists()
+    )
+    (tmp_path / "cold-history.json").rename(root / "company" / "cold" / "history.json")
     # the statement before: the ledger in the tree that closed at this one's opening block is cited, with its reference
     first_ref = json.loads((directory / f"company-{date}.json").read_text())["report_id"]
     assert cli_module.main(["report", "--from-height", "1010", "--to-height", "1012", "-o", str(tmp_path / "next")]) == 1
@@ -287,7 +301,7 @@ def test_the_statement_is_the_holders(wallet, tmp_path, monkeypatch, capsys):
         "label": date, "report_id": first_ref, "file": f"company-{date}.json", "closing_sat": 78_000, "closing_btc": "0.00078000", "agrees": True,
     }  # fmt: skip
     assert f"the closing holdings of {date}, reference {first_ref}" in (tmp_path / "next" / "company-1010..1012.html").read_text()
-    assert cli_module.main(["report", "-w", "cold", "-o", str(tmp_path / "c")]) == 2  # the statement is the holder's: no wallet's
+    assert cli_module.main(["-w", "cold", "report", "-o", str(tmp_path / "c")]) == 2  # the statement is the holder's: no wallet's
     assert "-w names a wallet for history and balance" in capsys.readouterr().err and not (tmp_path / "c").exists()
     nodes.pop("treasury")  # treasury unloaded too: it held coins at its kept tip, so a spend since would be missed
     assert cli_module.main(["report", "-o", str(tmp_path / "refused")]) == 2
@@ -325,11 +339,27 @@ def test_the_statement_is_the_holders(wallet, tmp_path, monkeypatch, capsys):
     rows = list(csv.DictReader((tmp_path / "jonas" / f"jonas-{date}.csv").open()))
     assert [(r["category"], r["wallet"]) for r in rows] == [("receive", "treasury"), ("send", "Exchange"), ("mixed", "treasury")]
     # the joint transaction: treasury's coin and cold's into treasury, which is another holder's wallet now, named once
+    # one wallet, read from its kept history: the statement says so in the notes, as the share rows do for several
+    nodes.pop("cold")
+    assert cli_module.main(["report", "jonas", "-o", str(tmp_path / "kept1")]) == 0
+    capsys.readouterr()
+    html = (tmp_path / "kept1" / f"jonas-{date}.html").read_text()
+    assert (
+        "Holder jonas, wallet cold, history kept " in html
+        and json.loads((tmp_path / "kept1" / f"jonas-{date}.json").read_text())["node_check"] is None
+    )
+    nodes["cold"] = cold_node
     monkeypatch.chdir(root / "jonas" / "cold")
     assert cli_module.main(["report", "-o", str(tmp_path / "here")]) == 0 and (tmp_path / "here" / f"jonas-{date}.json").exists()
     monkeypatch.chdir(root)
-    (root / "bip322.toml").write_text('holder = "jonas"\n')
+    (root / "bip322.toml").write_text(
+        'holder = "jonas"\n[wallets.cold]\ndust = 5\n'
+    )  # a statement key in a wallet's table: not read, said so
     assert cli_module.main(["report", "-o", str(tmp_path / "default")]) == 0 and (tmp_path / "default" / f"jonas-{date}.json").exists()
+    assert (
+        "note: dust in [wallets.cold] is not read by the statement, which is the holder's: set it in [holders.jonas]"
+        in capsys.readouterr().err
+    )
     assert cli_module.main(["report", "nobody", "-o", str(tmp_path / "nobody")]) == 2
     assert f"no wallet under {root / 'nobody'} yet" in capsys.readouterr().err
     _wallet_dir(root / "jonas" / "treasury")  # the same wallet name under two holders

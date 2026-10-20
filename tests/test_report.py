@@ -178,13 +178,11 @@ def test_report_backs_every_closing_coin_with_a_verified_proof(tmp_path, wallet,
         and 'href="https://mempool.space/tx/' in html
     )
     assert "VALID" in html and "no proof" not in html and "Attention" not in html
-    assert report["report_id"] and len(report["report_id"]) == 16 and report["report_id"] in html and report["holder"] is None
+    assert report["report_id"] and len(report["report_id"]) == 16 and report["report_id"] in html and "holder" not in report
     again = build_report(history, period, label="Treasury", proofs_roots=[ledger], cli=node, rates=Rates.constant_rate("SEK", "1000000"))
     assert again["report_id"] == report["report_id"]  # the same facts give the same reference, whenever generated
     assert [t["balance_after_sat"] for t in report["transactions"]] == [64_000_000, 63_900_000]  # a running balance
     assert "(0.20000000)" in html and "(0.01000000)" in html  # the amount sent and the fee, both in accounting parentheses
-    with_holder = render_html(build_report(history, period, label="Treasury", holder="Demo Holdings AB", proofs_roots=[ledger], cli=node))
-    assert "Demo Holdings AB" in with_holder
     assert "href=" not in render_html(report, explorer="") and "href=" not in render_html(report)  # links only when an explorer is named
     csv_path = tmp_path / "t.csv"
     write_csv(report, csv_path)

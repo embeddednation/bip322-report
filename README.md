@@ -91,7 +91,10 @@ handbook; the keys this package reads are `holder`, `wallet`, `cli`,
 `[addresses]` table: the wallet each address of someone else belongs to
 (`"bc1q..." = "Exchange"`), which names the other side of a movement; the
 wallets of the tree name their own addresses, so a move between two of them
-needs no entry.
+needs no entry. The statement's own settings, `dust`, `theme`, `heading` and
+`explorer`, come from `[holders.KEY]` and the top level, not from a wallet's
+table, which carries what is read per wallet (`node`, `cli`); the statement
+says so when it finds one there.
 A holder is a directory of the tree with its wallets' directories under it;
 `[holders.KEY]` gives its `name` for the statement's header, and any other
 key there (`dust`, `theme`, …) is a default for the holder's wallets, between
@@ -309,10 +312,11 @@ hold (older ones, another wallet's given with `--snapshots`) appears as a
 bare count.
 
 **What to hand over:** the statement directory,
-`<holder>/statements/<label>/` in the data directory. Four kinds of file and nothing
-else: `<holder>-<label>.pdf` (or `.html`), `.json`, `.csv`, and a copy of
-each proofs file the statement cites, and no other, under its own name, so
-a reader can run `bip322 audit verify` on each. Never hand over the
+`<holder>/statements/<label>/` in the data directory. Five kinds of file and nothing
+else: `<holder>-<label>.pdf` (or `.html`), `.json`, `.csv`, the reader's
+`<holder>-<label>-history.pdf`, and a copy of each proofs file the statement
+cites, and no other, under its own name, so a reader can run `bip322 audit
+verify` on each. Never hand over the
 snapshots: their PSBT files carry the wallet's xpubs. `--no-proofs` skips
 the copy.
 

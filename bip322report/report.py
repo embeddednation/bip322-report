@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shlex
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -33,7 +33,6 @@ def build_report(
     period: Period,
     *,
     label: str,
-    holder: str | None = None,
     proofs_roots=(),
     cli: BitcoinCli | None = None,
     rates: Rates | None = None,
@@ -45,6 +44,7 @@ def build_report(
     wallets: Sequence[str] | None = None,
     sources: dict[str, dict] | None = None,
     node_check: bool = True,
+    node_clis: Mapping[str, BitcoinCli] | None = None,
 ) -> dict:
     """The report as a plain dict (what report.json holds and the templates render).
 
@@ -58,7 +58,9 @@ def build_report(
     received by the other, the fee with the sender), paid in fees, and the
     movements as that wallet sees them under ``wallets``, oldest wallet
     first, with where its history came from when ``sources`` says (node, or the file
-    kept for a wallet the node has not loaded).  ``node_check`` False leaves out the listunspent cross-check,
+    kept for a wallet the node has not loaded).  ``node_clis``, for a holder, is each loaded wallet's node wallet: the
+    listunspent cross-check then runs per wallet over its own closing coins, merged into one ``node_check``
+    (:func:`_node_checks`).  ``node_check`` False leaves out the listunspent cross-check,
     which is per node wallet.
 
     ``cli`` is needed to re-verify the proofs files under ``proofs_roots`` against the chain and to
@@ -99,7 +101,6 @@ def build_report(
         "tool": TOOL,
         "generated_utc": _now(),
         "label": label,
-        "holder": holder,
         "chain": history.chain,
         "history_fetched_utc": history.fetched_utc,
         "period": period.to_dict(),
@@ -148,7 +149,13 @@ def build_report(
             if rates
             else None
         ),
-        "node_check": _node_check(cli, history, period, closing, dust) if cli is not None and node_check else None,
+        "node_check": (
+            _node_checks(node_clis, history, period, closing, dust)
+            if node_clis is not None  # a holder: per loaded wallet; none loaded means no check, not the chain-level node's
+            else _node_check(cli, history, period, closing, dust)
+            if cli is not None and node_check
+            else None
+        ),
     }
     report["wallets"] = (
         [_wallet_block(w, opening, closing, movements, rates, addresses or {}, (sources or {}).get(w)) for w in order]
@@ -822,6 +829,33 @@ def _report_id(report: dict) -> str:
         ],
     }
     return hashlib.sha256(json.dumps(facts, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def _node_checks(clis: Mapping[str, BitcoinCli], history: History, period: Period, closing: list[Coin], dust: list[Coin]) -> dict | None:
+    """A holder's node check: each loaded wallet's node wallet against that wallet's own closing coins, the results as one.
+
+    None when the period does not end at the tip (no wallet's check runs); ``ok`` None with every reason when a wallet's
+    could not run; else ``ok`` when each wallet's is, the counts added up, the lists joined, and ``wallets`` the ones checked.
+    """
+    checks = {
+        w: _node_check(c, history, period, [x for x in closing if x.wallet == w], [x for x in dust if x.wallet == w])
+        for w, c in clis.items()
+    }
+    found = {w: c for w, c in checks.items() if c is not None}
+    if not found:
+        return None
+    not_run = {w: c["reason"] for w, c in found.items() if c["ok"] is None}
+    if not_run:
+        return {"ok": None, "reason": "; ".join(f"{w}: {reason}" for w, reason in not_run.items())}
+    merged: dict = {"ok": all(c["ok"] for c in found.values()), "wallets": sorted(found)}
+    merged.update({k: sum(c[k] for c in found.values()) for k in ("listunspent_count", "closing_count")})
+    merged.update(
+        {
+            k: sorted(x for c in found.values() for x in c[k])
+            for k in ("missing_from_report", "not_in_listunspent", "spent_in_mempool", "immature")
+        }
+    )
+    return merged
 
 
 def _node_check(cli: BitcoinCli, history: History, period: Period, closing: list[Coin], dust: list[Coin] = ()) -> dict | None:

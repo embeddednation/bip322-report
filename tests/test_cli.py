@@ -333,9 +333,10 @@ def test_a_period_to_the_tip_closes_on_the_historys_tip(wallet, run, monkeypatch
     assert period_between(node, start, datetime(2099, 1, 1, tzinfo=UTC)).end.height == 1015  # without a history: the node's tip
     # the clock set to the fake chain's present: the year is not over, so it runs to the tip too
     monkeypatch.setattr("bip322report.period._now", lambda: datetime.fromtimestamp(block_time(1012) + 60, UTC))
+    node.tip_height = 1012  # the block arrives after the read again
     assert run(node, "report", "--year", "2023", "-o", "y")[0] == 1
     period = json.loads(_written("y", ".json").read_text())["period"]
-    assert period["to_tip"] and period["end"]["height"] == 1015 and period["label"] == "2023"  # the node's tip when read
+    assert period["to_tip"] and period["end"]["height"] == 1012 and period["label"] == "2023"
 
 
 def test_a_history_from_another_chain_or_a_reorged_tip_is_refused(wallet, run):
@@ -470,10 +471,12 @@ def test_wallet_and_dir_go_before_or_after_any_command(bundles, wallet, run, tmp
     assert [p.name for p in (tmp_path / "bip322").iterdir()] == ["bip322.toml"]  # nothing written to BIP322_DIR
     code, _, err = run(node, "--dir", elsewhere, "report", *HEIGHTS)
     assert code == 2 and "exists and is not empty" in err  # the same place, found again
-    code, _, err = run(node, "--dir", elsewhere, "report", *HEIGHTS, "-w", "watch", "-o", "w")
+    code, _, err = run(node, "-w", "watch", "--dir", elsewhere, "report", *HEIGHTS, "-o", "w")
     assert code == 2 and "-w names a wallet for history and balance" in err and not Path("w").exists()
     for argv in (["block", "-w", "x", "2026-01-01"], ["history", "--dir", "d", "-w", "x"], ["report", "-y", "2026", "--dir", "d"]):
         cli_module.build_parser().parse_args(argv)  # accepted after the command
+    with pytest.raises(SystemExit):
+        cli_module.build_parser().parse_args(["report", "-w", "x"])  # the statement is the holder's: no -w of its own
 
 
 def test_the_sample_config_names_a_theme_and_a_heading_style_that_exist():

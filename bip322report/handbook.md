@@ -111,9 +111,12 @@ node = "treasury-2of3-main"         # the node wallet, when its name is not the 
 but `holder`, `wallet` and their tables as comments to switch on.
 
 Other keys: `cli` (how to reach the node), `timeout`, `theme`, `heading`,
-`explorer`. For `history` and `balance`, without `-w` and outside a wallet's
-directory, `wallet` in the file names the wallet, else the node's one loaded
-wallet is it.
+`explorer`. The statement's own settings, `dust`, `theme`, `heading` and
+`explorer`, are read from `[holders.KEY]` and the top level, not from a
+wallet's table, which carries what is read per wallet (`node`, `cli`, `text`);
+the statement says so when it finds one there. For `history` and `balance`,
+without `-w` and outside a wallet's directory, `wallet` in the file names the
+wallet, else the node's one loaded wallet is it.
 The other side of a movement, the statement's `wallet` column, is named by
 its addresses: a send by the addresses it paid, a receive by the addresses it
 came from, which the node reads from the block (Bitcoin Core 25 or later, no
@@ -275,7 +278,8 @@ may repeat; a path that does not exist or holds no proofs file is an error.
 ### What to hand over
 
 The statement directory, `company/statements/2026/`: the PDF, the
-JSON with every figure, the CSV of movements, and a copy of each proofs
+JSON with every figure, the CSV of movements, the reader's
+`company-2026-history.pdf`, and a copy of each proofs
 file the statement cites on a UTXO's page, under its own name. No other
 proofs file is copied or named. Never the snapshots: their PSBTs carry the
 wallet's xpubs.

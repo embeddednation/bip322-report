@@ -14,7 +14,7 @@
     <h1>{{ r.label }} · {{ r.period.label }}</h1>
   </div>
 </div>
-<p class="period">{% if r.holder %}{{ r.holder }} · {% endif %}<span class="when">{{ r.period.start.time_utc | utc }}</span> – <span class="when">{{ r.period.end.time_utc | utc }}</span>{% if r.chain != "main" %} · {{ r.chain }} chain{% endif %}</p>
+<p class="period"><span class="when">{{ r.period.start.time_utc | utc }}</span> – <span class="when">{{ r.period.end.time_utc | utc }}</span>{% if r.chain != "main" %} · {{ r.chain }} chain{% endif %}</p>
 {% set many = r.wallets and r.wallets | length > 1 %}
 <p>Holdings at the end of the period: <strong>{{ r.closing.total_btc }} BTC</strong>{% if many %}, in {{ r.wallets | length }} wallets: {% for w in r.wallets %}{{ w.name }} {{ w.closing_btc }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.</p>
 
