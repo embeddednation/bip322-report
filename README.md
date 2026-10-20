@@ -196,17 +196,18 @@ has a table of the holder's wallets and names the wallet in each movement.
   the table. Then one sentence
   saying what is proven, or, when a check failed, an ATTENTION checklist.
 * The movements, in the style of a bank statement, one block per wallet for
-  a holder: each transaction with its date, its kind in words
-  (Received, Sent, Internal move, Joint transaction, Dust swept), the
-  counterparty, the amount before the fee (the currency's value under it),
-  the fee and the wallet's running balance, the id of its transaction whole
-  in a column of its own, linked to the explorer; opening and closing rows.
+  a holder: each transaction named by the first sixteen characters of its
+  id, linked to the explorer (the JSON and the CSV carry it whole), with its
+  date, the counterparty (an internal move, a joint transaction or dust
+  swept named as such instead), the amount before the fee, received or
+  (sent), with the currency's value under it, the fee and the wallet's
+  running balance; opening and closing rows.
   A move between two of the holder's
   wallets appears in both blocks under the same transaction, sent by the one
   and received by the other for the same amount, the fee with the sender.
 * Holdings at the end of the period, on a page of its own: one row per
-  UTXO (a holder's grouped by wallet) with its id, `txid:vout`, whole, when
-  it arrived, the amount, the proof's verdict and block, and the section
+  UTXO (a holder's grouped by wallet) with its id, `txid:vout`, whole, the
+  amount, the proof's verdict and block, and the section
   that shows it; the transaction that created it is among the movements.
   Then one page per UTXO in two steps, each
   a pasteable command with what it printed. *Proof of control of the scriptPubKey*: the address, its

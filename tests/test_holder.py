@@ -49,10 +49,6 @@ def csv_blocks(path: Path) -> dict[str, list[dict]]:
     return blocks
 
 
-def _chunked(txid: str) -> str:
-    return "<wbr>".join(txid[i : i + 8] for i in range(0, len(txid), 8))
-
-
 def test_merged_histories_make_one_ledger(wallet, tmp_path):
     nodes, (a0, a1, c0, c1) = _two_wallets(wallet)
     histories = {name: fetch_history(node) for name, node in nodes.items()}
@@ -158,21 +154,21 @@ def test_merged_histories_make_one_ledger(wallet, tmp_path):
     assert html.index("Opening holdings") < html.index('<td class="sub">cold</td>') < html.index("Closing holdings")
     assert "<th>Wallet</th>" not in html and "Transfers" not in html and "0.00149184" not in html and "<td>Transfer</td>" not in html
     assert html.index("1.1 treasury</h3>") < html.index("1.2 cold</h3>")
-    ids = [html.count(f'<td class="id"><span class="mono ">{_chunked(x)}</span></td>') for x in (A, B, C, D)]
-    assert ids == [1, 2, 1, 2]  # the moves between the wallets (B and D) on both sides, each transaction's id whole, in its column
+    ids = [html.count(f'<td class="id"><span class="mono">{x[:16]}…</span></td>') for x in (A, B, C, D)]
+    assert ids == [1, 2, 1, 2]  # the moves between the wallets (B and D) on both sides, each transaction by the start of its id
     assert (
         html.index("Opening holdings")
         < html.index("At the end of the period")
         < html.index('<td class="sub">treasury</td><td class="num">0.00078000')
         < html.index("Closing holdings")
     )
-    assert '<td>Sent</td><td>cold</td><td class="num">(0.00070000)</td><td class="num">(0.00001000)</td>' in html
-    assert '<td>Received</td><td>treasury</td><td class="num">0.00070000</td><td class="num"></td>' in html
+    assert '<td>cold</td><td class="num">(0.00070000)</td><td class="num">(0.00001000)</td>' in html and "<th>Kind</th>" not in html
+    assert '<td>treasury</td><td class="num">0.00070000</td><td class="num"></td>' in html
     # the id links to the transaction when an explorer is named; one page, for the one closing UTXO
     assert C not in html and "The transactions" not in html and html.count("Proof of control of the scriptPubKey") == 1
     linked = render_html(report, explorer="https://x")
-    assert linked.count(f'<a class="mono " href="https://x/tx/{C}?showDetails=true">{_chunked(C)}</a>') == 1 and linked.count(C) == 1
-    assert '<tr class="group"><td colspan="5">treasury</td></tr>' in html and html.count('<tr class="group">') == 1  # cold holds nothing
+    assert linked.count(f'<a class="mono" href="https://x/tx/{C}?showDetails=true" title="{C}">{C[:16]}…</a>') == 1 and linked.count(C) == 2
+    assert '<tr class="group"><td colspan="4">treasury</td></tr>' in html and html.count('<tr class="group">') == 1  # cold holds nothing
     # one wallet alone is still its own view: no transfer, no wallet column, no table of wallets
     alone = build_report(histories["treasury"], period_for_heights(nodes["treasury"], 1000, 1010), label="treasury", cli=None)
     assert alone["wallets"] is None and "<h3>1.1 " not in render_html(alone) and '<tr class="sub">' not in render_html(alone)
@@ -228,9 +224,15 @@ def test_the_holder_command(wallet, tmp_path, monkeypatch, capsys):
     # the reader's document: each wallet a section, oldest first, the counterparty and the running balance, no txids, no proofs
     reader = (directory / f"company-{date}-history.html").read_text()
     assert "Transaction history" in reader and reader.index("1.</span> treasury") < reader.index("2.</span> cold")
-    assert "<th>Counterparty</th>" in reader and "<td>Received</td><td>Exchange</td>" in reader and '<th class="num">Fee</th>' in reader
-    assert '<td>Sent</td><td>cold</td><td class="num">(0.00070000)</td><td class="num">(0.00001000)</td>' in reader  # amount and fee apart
-    assert '<td>Received</td><td>treasury</td><td class="num">0.00070000</td><td class="num"></td>' in reader  # so the move pairs
+    assert (
+        "<th>Counterparty</th>" in reader
+        and '<td>Exchange</td><td class="num">0.00100000</td>' in reader
+        and '<th class="num">Fee</th>' in reader
+    )
+    assert '<td>cold</td><td class="num">(0.00070000)</td><td class="num">(0.00001000)</td>' in reader  # amount and fee apart
+    assert (
+        '<td>treasury</td><td class="num">0.00070000</td><td class="num"></td>' in reader and "<th>Kind</th>" not in reader
+    )  # so the move pairs
     body = reader.split("</head>")[1]  # the shared style names the statement's colours; the document itself says nothing of proofs
     assert A not in body and B not in body and "proof" not in body.lower().replace("proofs of control", "") and "scriptPubKey" not in body
     assert (

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.28.0 (2026-10-20)
+
+A movement names its transaction by the first sixteen characters of its id,
+linked to the explorer with the whole id as the link's title; the JSON and
+the CSV carry it whole. The Kind column is gone: received and sent show in
+the amount's sign, and an internal move, a joint transaction and dust swept
+are named as such in the counterparty column, in the statement and in the
+reader's document alike. The holdings lose their Received column; the
+UTXO's page keeps the date.
+
 ## 0.27.1 (2026-10-20)
 
 The movements and the holdings are set in 8pt, their ids in 7pt as before,

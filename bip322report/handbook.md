@@ -321,7 +321,7 @@ script interpreter as a second engine; bip322-report is not needed to verify).
    each wallet's share is listed under the opening holdings and above the
    closing ones. One sentence says what is proven; any failed check
    appears instead as ATTENTION with a checklist. Then the movements, one
-   block per wallet for a holder, each transaction with its id under it, a
+   block per wallet for a holder, each transaction named by the start of its id, a
    move between wallets on both sides under the same one, and the closing
    UTXOs with each proof's verdict. A joint
    transaction was funded by the wallet and by others: its fee is unknown

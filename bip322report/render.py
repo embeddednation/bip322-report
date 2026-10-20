@@ -245,6 +245,7 @@ def _env() -> Environment:
     env.filters["paren"] = lambda text: "–" if _nil(text) else f"({text})"  # a sum that is subtracted: in parentheses, a dash for nothing
     env.filters["nil"] = lambda text: "–" if _nil(text) else str(text)  # a dash for nothing, in a table of sums
     env.filters["chunks"] = _chunks
+    env.filters["side"] = _side
     env.filters["breakable"] = _breakable
     env.filters["hl"] = _highlight
     env.filters["utc"] = lambda iso: (str(iso).replace("T", " ").replace("Z", " UTC")) if iso else ""
@@ -256,6 +257,19 @@ def _acct(text) -> str:
     if text is None:
         return ""
     return f"({text[1:]})" if str(text).startswith("-") else str(text)
+
+
+def _side(row: dict) -> str:
+    """The counterparty cell: the other side as named, or, for a movement with no other side in the ordinary sense, what it is:
+    an internal move, a joint transaction (with whoever is named), dust swept."""
+    other = row.get("counterpart") or ""
+    if row["kind"] == "internal":
+        return "Internal move"
+    if row["kind"] == "swept":
+        return "Dust swept"
+    if row["kind"] == "mixed":
+        return f"Joint transaction with {other}" if other else "Joint transaction"
+    return other
 
 
 def _chunks(value: str) -> Markup:

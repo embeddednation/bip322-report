@@ -154,9 +154,7 @@ def test_a_transaction_funded_with_others_is_mixed_and_its_fee_unknown(tmp_path,
     assert (totals["received_sat"], totals["sent_sat"], totals["mixed_sat"], totals["mixed_count"]) == (0, 30_000, 50_000, 1)
     assert (totals["amount_sat"], totals["amount_btc"], totals["fees_sat"]) == (20_000, "0.00020000", 1_000)
     html = render_html(report)
-    assert (
-        '<td>Joint transaction</td><td></td><td class="num">0.00050000</td><td class="num"><span class="muted">unknown</span></td>' in html
-    )
+    assert '<td>Joint transaction</td><td class="num">0.00050000</td><td class="num"><span class="muted">unknown</span></td>' in html
     assert 'the holdings of section 2</td><td class="num">0.00020000</td><td class="num">(0.00001000)</td>' in html  # the sum of the rows
     assert "Joint transactions, the wallet's net</td>" in html and "1, funded by others too: their fees unknown" in html
     assert "its fee is unknown" in html and html.count("fees unknown") == 1
