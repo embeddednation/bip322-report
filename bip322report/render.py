@@ -368,8 +368,22 @@ def render_html(
             doc=STATEMENT,
             kinds=KINDS,
             proven=_proven(report),
+            pages=_pages(report),
         )
     )
+
+
+def _pages(report: dict) -> list[dict]:
+    """The closing UTXOs as the statement lists and pages them, a holder's by wallet in the ledger's order: each with its number,
+    its address's script and proof (``closing.addresses``, where the proof is verified) and whether that proof predates it."""
+    rank = {w["name"]: n for n, w in enumerate(report["wallets"] or [])}
+    groups = {a["address"]: a for a in report["closing"]["addresses"]}
+    pages = []
+    for o in sorted(report["closing"]["coins"], key=lambda c: rank.get(c.get("wallet"), len(rank))):
+        a = groups[o["address"]]
+        before = bool(a["proof"] and o["height"] is not None and int(a["proof"]["stamp"]["height"]) < o["height"])
+        pages.append({"n": len(pages) + 1, "o": o, "a": a, "before": before})
+    return pages
 
 
 def _proven(report: dict) -> str:
@@ -382,10 +396,9 @@ def _proven(report: dict) -> str:
         if report["dust"]["count"]:
             return "Nothing but dust at the end of the period (see the notes): nothing to prove."
         return "No holdings at the end of the period: nothing to prove."
-    n, m = cov["total_count"], cov["addresses_total"]
+    n = cov["total_count"]
     utxos = "The closing UTXO" if n == 1 else f"All {n} closing UTXOs"
-    where = f"at {'its' if n == 1 else 'their'} address" if m == 1 else f"in {m} addresses"
-    text = f"{utxos}, {where}, {'has' if n == 1 else 'have'} a valid proof of control (section 3)"
+    text = f"{utxos} {'has' if n == 1 else 'have'} a valid proof of control (section 3)"
     chain = report.get("onchain")
     if chain and not chain.get("not_run"):
         text += f", and {'it is' if n == 1 else 'each is'} on the chain at the block of {'its' if n == 1 else 'their'} proof"

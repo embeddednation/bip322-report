@@ -372,11 +372,9 @@ def test_change_address_proven_before_the_spend_covers_the_change_output(tmp_pat
     html = render_html(report)
     assert "The proof predates this UTXO" in html and "verifymessage" in html and "VALID" in html
     by_addr = {a["address"]: a for a in report["closing"]["addresses"]}
-    assert (
-        by_addr[wallet.derive(1, 1).address]["proof"]["before_coins"] == "all"
-        and by_addr[wallet.derive(1, 1).address]["total_sat"] == 29_000_000
-    )
-    assert report["coverage"]["addresses_total"] == 3 and report["coverage"]["addresses_covered"] == 2
+    assert by_addr[wallet.derive(1, 1).address]["total_sat"] == 29_000_000 and len(by_addr) == 3
+    assert report["coverage"]["covered_count"] == 2 and report["coverage"]["total_count"] == 3
+    assert html.count("The proof predates this UTXO") == 1 and html.count("· before the UTXO") == 1  # dd:1 alone: a2 proven ahead
     # after the year-end bundle nothing is left to prove
     with pytest.raises(Exception, match="already proven"):
         take_snapshot(node40, wallet, "x", skip_addresses=proven_addresses([ledger]))
@@ -621,15 +619,15 @@ def test_a_proof_that_fails_the_statements_own_verification_is_not_ok(tmp_path, 
     monkeypatch.setattr(report_module, "verify_message", first_fails)
     report = build_report(fetch_history(node), period_for_heights(node, 985, 1000, label="t"), label="T", proofs_roots=[ledger], cli=node)
     cov = report["coverage"]
-    assert cov["covered_count"] < cov["total_count"] and cov["addresses_covered"] < cov["addresses_total"]
+    assert cov["covered_count"] < cov["total_count"]
     assert not cov["complete"] and not report["ok"] and "ATTENTION" in render_html(report)
     # the counts by output and by address agree: an address is covered exactly when its outputs are
     for a in report["closing"]["addresses"]:
         assert all(o["proof"]["verified"] == a["proof"]["verified"] for o in a["outputs"])
 
 
-def test_one_page_per_address_and_the_transactions_by_number(wallet):
-    """An address holding several UTXOs gets one page: the proof once, a lookup per UTXO; a movement names its transaction briefly."""
+def test_one_page_per_utxo_and_the_movements_by_txid(wallet):
+    """Every UTXO gets a page with its address's proof, two at one address each their own; a movement carries its whole txid."""
     node = _node(wallet, tip=1000)
     report = build_report(fetch_history(node), period_for_heights(node, 985, 1000), label="x", cli=None)
     assert (
@@ -640,13 +638,18 @@ def test_one_page_per_address_and_the_transactions_by_number(wallet):
         ]
     )
     html = render_html(report)
-    assert html.count("Proof of control of the scriptPubKey") == 2 and html.count('<td class="k">utxo</td>') == 3
-    assert "2 UTXOs, 0.75000000 BTC, received 2023-11-" in html and "3.1</td>" in html and "3.2</td>" in html
+    assert html.count("Proof of control of the scriptPubKey") == 3 and html.count('<td class="k">lookup</td>') == 3
+    assert html.count("one of 2 UTXOs at this address, under the same proof") == 2 and "3.3</td>" in html and "3.4</td>" not in html
+    assert f'<span class="mono hl-utxo"><span class="mono hl-utxo">{"cc" * 32}</span>:0</span></td></tr>' in html  # section 2, whole
+    assert html.index(f'UTXO <span class="mono hl-utxo"><span class="mono hl-utxo">{"cc" * 32}') < html.index(
+        f'UTXO <span class="mono hl-utxo"><span class="mono hl-utxo">{"aa" * 32}'
+    )
     assert "The closing UTXO" not in html  # no proofs here: ATTENTION, and no sentence saying what is proven
     movements = html.split("Holdings at the end")[0]
-    assert "aa" * 32 not in movements and '<td class="mono muted">bbbbbbbb</td><td>2023-11-' in movements  # the first characters only
+    assert movements.count(f'<tr class="id"><td colspan="5"><span class="mono muted">{"bb" * 32}</span></td></tr>') == 1
+    assert "aa" * 32 in movements and "cc" * 32 not in movements  # cc arrived before the period
     linked = render_html(report, explorer="https://x").split("Holdings at the end")[0]
-    assert f'<a href="https://x/tx/{"bb" * 32}?showDetails=true" title="{"bb" * 32}">bbbbbbbb</a>' in linked
+    assert f'<a class="mono muted" href="https://x/tx/{"bb" * 32}?showDetails=true">{"bb" * 32}</a>' in linked
 
 
 def test_the_statement_before_is_the_one_that_closed_at_the_opening_block(tmp_path):

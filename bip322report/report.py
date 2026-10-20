@@ -92,9 +92,6 @@ def build_report(
     scripts = {a["address"]: a["script"]["script_pubkey"] for a in closing_addresses}
     onchain_result = _onchain(cli, closing_rows, period, scripts, progress) if cli is not None and onchain and closing_rows else None
     order = _wallet_order(history, wallets) if wallets is not None else None
-    if order is not None:  # the holdings by wallet, oldest wallet first, as the ledger's wallets come
-        rank = {w: n for n, w in enumerate(order)}
-        closing_addresses.sort(key=lambda a: rank.get(a["wallet"], len(rank)))
     tx_rows, totals = _movement_rows(movements, opening_sat, rates, addresses or {}, label, holder=wallets is not None)
     net_sat = totals["net_sat"]
 
@@ -129,7 +126,7 @@ def build_report(
             "ok": closing_sat == opening_sat + net_sat,
         },
         "dust": _dust_block(dust, dust_sat, movements, created),
-        "coverage": _coverage(closing_rows, closing_addresses, closing_sat),
+        "coverage": _coverage(closing_rows, closing_sat),
         "proofs_files": [
             {**f.to_dict(), "after_period": int(f.stamp["height"]) > period.end.height, "used_for": used[f.path]}
             for f in files
@@ -522,11 +519,10 @@ def _covered(row: dict) -> bool:
     return bool(row["proof"] and row["proof"]["verified"])
 
 
-def _coverage(rows: list[dict], addresses: list[dict], closing_sat: int) -> dict:
-    """How much of the closing balance a verified proof backs, counted by output and by address (an address: all of its outputs)."""
+def _coverage(rows: list[dict], closing_sat: int) -> dict:
+    """How much of the closing balance a verified proof backs, by UTXO."""
     uncovered = [r for r in rows if not _covered(r)]
     covered_sat = closing_sat - sum(r["amount_sat"] for r in uncovered)
-    whole = [a for a in addresses if all(_covered(o) for o in a["outputs"])]
     return {
         "covered_sat": covered_sat,
         "covered_btc": btc(covered_sat),
@@ -534,9 +530,6 @@ def _coverage(rows: list[dict], addresses: list[dict], closing_sat: int) -> dict
         "uncovered_btc": btc(closing_sat - covered_sat),
         "covered_count": len(rows) - len(uncovered),
         "covered_after_period_count": sum(1 for r in rows if _covered(r) and r["proof"]["after_period"]),
-        "addresses_total": len(addresses),
-        "addresses_covered": len(whole),
-        "addresses_after_period": sum(1 for a in whole if a["proof"]["after_period"]),
         "total_count": len(rows),
         "complete": not uncovered,
         "uncovered": [{k: r[k] for k in ("txid", "vout", "address", "amount_sat", "amount_btc")} for r in uncovered],
@@ -771,10 +764,10 @@ def _spent_by(tx: WalletTx | None) -> dict | None:
 
 
 def _by_address(rows: list[dict]) -> list[dict]:
-    """The closing coins grouped per address, in order of first appearance: the statement's unit, since proofs are per address.
+    """The closing coins grouped per address, in order of first appearance: where the proof is verified, since proofs are per
+    address; the statement's unit stays the UTXO, each page quoting its address's proof.
 
-    The address's proof is its first output's, as a copy: the statement adds to it what the page of the address quotes
-    (``before_coins`` here, the verify command and its output in ``_verify_by_script``).
+    The address's proof is its first output's, as a copy: ``_verify_by_script`` adds to it the verify command and its output.
     """
     groups: dict[str, dict] = {}
     for row in rows:
@@ -783,18 +776,11 @@ def _by_address(rows: list[dict]) -> list[dict]:
         )
         g["total_sat"] += row["amount_sat"]
         g["outputs"].append(row)  # the same dict as in closing["coins"]: the on-chain result lands on it later
-    out = []
     for g in groups.values():
         g["total_btc"] = btc(g["total_sat"])
-        times = sorted(o["created_utc"] for o in g["outputs"] if o["created_utc"])
-        g["received_first"], g["received_last"] = (times[0], times[-1]) if times else (None, None)
         if g["proof"]:
-            stamp = int(g["proof"]["stamp"]["height"])
-            heights = [o["height"] for o in g["outputs"] if o["height"] is not None]
-            before = "all" if heights and stamp < min(heights) else ("some" if heights and stamp < max(heights) else None)
-            g["proof"] = {**g["proof"], "before_coins": before}
-        out.append(g)
-    return out
+            g["proof"] = dict(g["proof"])
+    return list(groups.values())
 
 
 def _single(values: set) -> str | None:

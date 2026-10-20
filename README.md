@@ -196,23 +196,22 @@ has a table of the holder's wallets and names the wallet in each movement.
   the table. Then one sentence
   saying what is proven, or, when a check failed, an ATTENTION checklist.
 * The movements, in the style of a bank statement, one block per wallet for
-  a holder: each transaction named by the first eight characters of its id,
-  with its date, its kind in words
+  a holder: each transaction with its date, its kind in words
   (Received, Sent, Internal move, Joint transaction, Dust swept), the
   counterparty, the amount before the fee, the fee and the wallet's running
-  balance; opening and closing rows. A move between two of the holder's
+  balance, and under them the id of its transaction, whole and linked to
+  the explorer; opening and closing rows. A move between two of the holder's
   wallets appears in both blocks under the same transaction, sent by the one
   and received by the other for the same amount, the fee with the sender.
-  The name links to the transaction on the explorer; the JSON and the CSV
-  carry the id whole.
-* Holdings at the end of the period: one row per address (a holder's grouped
-  by wallet) with when its coins arrived, how many UTXOs it holds, the
-  amount, the proof's verdict and block, and the page of section 3 that
-  shows it. Then one page per address in two steps, each
-  a pasteable command with what it printed. *Proof of control of the scriptPubKey*: message, proof, and
-  `bip322 verifymessage <scriptPubKey> ...` with its verdict, once for the
-  address. *On the
-  chain*, for each UTXO at it: `bip322 audit holdings TXID:VOUT --at <block of the proof>`, the
+* Holdings at the end of the period: one row per UTXO (a holder's grouped
+  by wallet) with when it arrived, the amount, the proof's verdict and
+  block, the page of section 3 that shows it, and its id, `txid:vout`,
+  whole: the transaction that created it is among the movements. Then one
+  page per UTXO in two steps, each
+  a pasteable command with what it printed. *Proof of control of the scriptPubKey*: the address, its
+  scriptPubKey, message, proof, and
+  `bip322 verifymessage <scriptPubKey> ...` with its verdict. *On the
+  chain*: `bip322 audit holdings TXID:VOUT --at <block of the proof>`, the
   block named in the proof's message, which reports the same scriptPubKey as
   the UTXO's lock, the amount, and that it was held at that block (confirmed
   by then and unspent now). Control and holding are thus shown at one block.

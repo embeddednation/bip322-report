@@ -137,5 +137,5 @@ the wallet's snapshots. What it hands to a reader, the report and the proofs
 files, is checkable on any node with the chain and no wallet: `bip322 audit
 verify` for the proofs files, `gettxout` and the transactions by txid for the balances and
 movements. The statement's notes name the files that come with it and the
-command that checks a proofs file; the commands on the address pages paste as
+command that checks a proofs file; the commands on the UTXO pages paste as
 they stand.

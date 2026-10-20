@@ -34,8 +34,8 @@ given as its argument.
   goes: in the snapshot, beside a statement, on the auditor's disk.
 * **The statement** (`bip322 report`) is the document for the
   auditor: a summary from the opening holdings to the closing ones, the
-  movements, the closing addresses each backed by a verified proof, one page
-  per address with the commands that check it, the transactions by number, a
+  movements with their transaction ids, the closing UTXOs each backed by a
+  verified proof, one page per UTXO with the commands that check it, a
   section on how a proof works, and notes. A holder's ledger (`bip322 report
   holder`) is the same document over every wallet of the holder's, with a
   table of the wallets on the first page.
@@ -319,9 +319,9 @@ script interpreter as a second engine; bip322-report is not needed to verify).
    each wallet's share is listed under the opening holdings and above the
    closing ones. One sentence says what is proven; any failed check
    appears instead as ATTENTION with a checklist. Then the movements, one
-   block per wallet for a holder, each transaction named by the first
-   eight characters of its id, a move between wallets on both sides under
-   the same one, and the closing addresses with each proof's verdict. A joint
+   block per wallet for a holder, each transaction with its id under it, a
+   move between wallets on both sides under the same one, and the closing
+   UTXOs with each proof's verdict. A joint
    transaction was funded by the wallet and by others: its fee is unknown
    and shown as such, its amount is the wallet's net.
 2. **Re-verify the proofs** on your own node:
@@ -329,12 +329,11 @@ script interpreter as a second engine; bip322-report is not needed to verify).
    This checks every signature with every engine installed, that the
    block named in the message exists at that height with that time, and
    that every output the file lists existed at that block.
-3. **Re-run any page.** Each address page prints the commands with their
-   output: `bip322 verifymessage <scriptPubKey> <proof> "<message>"` once,
-   and `bip322 audit holdings <txid>:<vout> --at <block>` for each UTXO at
-   the address. Paste them as they stand; the backslashes continue the
-   lines. A movement's transaction name links to it on the explorer; the
-   JSON and the CSV carry the whole id. For a second opinion on a
+3. **Re-run any page.** Each UTXO page prints the commands with their
+   output: `bip322 verifymessage <scriptPubKey> <proof> "<message>"` and
+   `bip322 audit holdings <txid>:<vout> --at <block>`. Paste them as they
+   stand; the backslashes continue the lines. A movement's transaction id
+   links to it on the explorer. For a second opinion on a
    proof, the reference checks in the bip322-core repository run other implementations beside the
    verifier.
 4. **Read section 4** for what a proof shows: that at the block named the

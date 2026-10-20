@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.26.0 (2026-10-20)
+
+The UTXO is the unit of sections 2 and 3 again, and a movement carries its
+transaction's id whole. Each movement is a row of two lines: the date over
+the time, the figures, and under them the full txid in small type, linked
+to the explorer; the counterparty has the width the txid column took. The
+holdings are one row per UTXO (a holder's grouped by wallet): when it
+arrived, the amount, the proof's verdict and block, its page, and under
+them its id, `txid:vout`, whole, so the transaction that created it is
+found among the movements by eye. Section 3 is one page per UTXO: the
+address, its scriptPubKey, the proof with the verify command, then the
+lookup of that UTXO; two UTXOs at one address each get a page, under the
+same proof. The checklist and the closing holdings count UTXOs. In the
+JSON, `coverage` loses its counts by address and `closing.addresses[]` its
+`received_first`, `received_last` and `proof.before_coins`.
+
 ## 0.25.0 (2026-10-19)
 
 The closing holdings close the first page's table, each wallet's share
