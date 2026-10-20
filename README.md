@@ -196,9 +196,8 @@ has a table of the holder's wallets and names the wallet in each movement.
   the table. Then one sentence
   saying what is proven, or, when a check failed, an ATTENTION checklist.
 * The movements, in the style of a bank statement, one block per wallet for
-  a holder: each transaction named by the first sixteen characters of its
-  id, linked to the explorer (the JSON and the CSV carry it whole), with its
-  date, the counterparty (an internal move, a joint transaction or dust
+  a holder: each transaction with its date, its id whole and linked to the
+  explorer, the counterparty (an internal move, a joint transaction or dust
   swept named as such instead), the amount before the fee, received or
   (sent), with the currency's value under it, the fee and the wallet's
   running balance; opening and closing rows.

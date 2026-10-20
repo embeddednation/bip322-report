@@ -644,17 +644,17 @@ def test_one_page_per_utxo_and_the_movements_by_txid(wallet):
     html = render_html(report)
     assert html.count("Proof of control of the scriptPubKey") == 3 and html.count('<td class="k">lookup</td>') == 3
     assert html.count("one of 2 UTXOs at this address, under the same proof") == 2 and "3.3</td>" in html and "3.4</td>" not in html
-    cc, aa = (_chunked(x * 32) for x in ("cc", "aa"))
+    cc, aa, bb = (_chunked(x * 32) for x in ("cc", "aa", "bb"))
     assert f'<td class="id"><span class="mono hl-utxo"><span class="mono hl-utxo">{cc}</span>:0</span></td>' in html  # section 2, whole
     assert html.index(f'UTXO <span class="mono hl-utxo"><span class="mono hl-utxo">{cc}') < html.index(
         f'UTXO <span class="mono hl-utxo"><span class="mono hl-utxo">{aa}'
     )
     assert "The closing UTXO" not in html  # no proofs here: ATTENTION, and no sentence saying what is proven
     movements = html.split("Holdings at the end")[0]
-    assert movements.count(f'<td class="id"><span class="mono">{"bb" * 8}…</span></td>') == 1  # the start of the id, in its column
-    assert f'<span class="mono">{"aa" * 8}…</span>' in movements and "cc" * 8 not in movements  # cc arrived before the period
+    assert movements.count(f'<td class="id"><span class="mono">{bb}</span></td>') == 1  # whole, in a column of its own, in groups of eight
+    assert aa in movements and cc not in movements  # cc arrived before the period
     linked = render_html(report, explorer="https://x").split("Holdings at the end")[0]
-    assert f'<a class="mono" href="https://x/tx/{"bb" * 32}?showDetails=true" title="{"bb" * 32}">{"bb" * 8}…</a>' in linked
+    assert f'<a class="mono" href="https://x/tx/{"bb" * 32}?showDetails=true">{bb}</a>' in linked
 
 
 def test_the_statement_before_is_the_one_that_closed_at_the_opening_block(tmp_path):

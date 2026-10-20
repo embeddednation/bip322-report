@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.29.0 (2026-10-20)
+
+The date leads a movement's row, and the transaction id follows it whole,
+in its own column, wrapping once between its eight-character groups into
+the two lines the date and time take.
+
 ## 0.28.0 (2026-10-20)
 
 A movement names its transaction by the first sixteen characters of its id,

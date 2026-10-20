@@ -17,10 +17,7 @@
 {%- endmacro %}
 {% macro yesno(v) -%}{% if v %}<span class="ok">✓</span>{% else %}<span class="bad">✗</span>{% endif %}{%- endmacro %}
 {% macro txid(t, role="") -%}
-  {% if explorer %}<a class="mono {{ role }}" href="{{ explorer }}/tx/{{ t }}?showDetails=true">{{ t | chunks }}</a>{% else %}<span class="mono {{ role }}">{{ t | chunks }}</span>{% endif %}
-{%- endmacro %}
-{% macro txref(t) -%}
-  {% if explorer %}<a class="mono" href="{{ explorer }}/tx/{{ t }}?showDetails=true" title="{{ t }}">{{ t[:16] }}…</a>{% else %}<span class="mono">{{ t[:16] }}…</span>{% endif %}
+  {% if explorer %}<a class="mono{% if role %} {{ role }}{% endif %}" href="{{ explorer }}/tx/{{ t }}?showDetails=true">{{ t | chunks }}</a>{% else %}<span class="mono{% if role %} {{ role }}{% endif %}">{{ t | chunks }}</span>{% endif %}
 {%- endmacro %}
 {% macro utxo(o) -%}<span class="mono hl-utxo">{{ txid(o.txid, "hl-utxo") }}:{{ o.vout }}</span>{%- endmacro %}
 <span class="meta" data-generated="{{ r.generated_utc }}" data-ref="{{ r.report_id }}"></span>
@@ -97,12 +94,12 @@
 {% if r.wallets %}<h3>1.{{ loop.index }} {{ b.name }}</h3>{% endif %}
 {% if b.transactions %}
 <table class="ids">
-  <colgroup><col style="width:16%"><col style="width:10%"><col><col style="width:11%"><col style="width:11%"><col style="width:11%"></colgroup>
-  <thead><tr><th>Txid</th><th>Date (UTC)</th><th>Counterparty</th><th class="num">Amount{% if r.fiat %}<br><span class="muted">{{ r.fiat.currency }}</span>{% endif %}</th><th class="num">Fee</th><th class="num">Balance</th></tr></thead>
+  <colgroup><col style="width:10%"><col style="width:29%"><col><col style="width:11%"><col style="width:11%"><col style="width:11%"></colgroup>
+  <thead><tr><th>Date (UTC)</th><th>Txid</th><th>Counterparty</th><th class="num">Amount{% if r.fiat %}<br><span class="muted">{{ r.fiat.currency }}</span>{% endif %}</th><th class="num">Fee</th><th class="num">Balance</th></tr></thead>
   <tbody>
   <tr class="open"><td colspan="5">Opening balance, {{ r.period.start.time_utc | utc }}</td><td class="num">{{ b.opening_btc }}</td></tr>
   {% for t in b.transactions %}
-  <tr><td class="id">{{ txref(t.txid) }}</td><td>{{ t.time_utc[:10] }}<br><span class="muted">{{ t.time_utc[11:19] }}</span></td>
+  <tr><td>{{ t.time_utc[:10] }}<br><span class="muted">{{ t.time_utc[11:19] }}</span></td><td class="id">{{ txid(t.txid) }}</td>
       <td>{{ t | side }}</td><td class="num">{% if t.amount_sat %}{{ t.amount_btc | acct }}{% if r.fiat and t.fiat.amount %}<br><span class="muted">{{ t.fiat.amount | acct }}</span>{% endif %}{% endif %}</td><td class="num">{% if t.kind == "mixed" %}<span class="muted">unknown</span>{% elif t.fee_btc %}({{ t.fee_btc }}){% endif %}</td><td class="num">{{ t.balance_after_btc }}</td></tr>
   {% endfor %}
   <tr class="total"><td colspan="3">Closing balance, {{ r.period.end.time_utc | utc }}{% if not r.wallets %} · the holdings of section 2{% endif %}</td><td class="num">{{ b.amount_btc | acct }}</td><td class="num">({{ b.fees_btc }})</td><td class="num">{{ b.closing_btc }}</td></tr>
@@ -114,7 +111,7 @@
 {% else %}<p class="small muted">No transactions in the period: the closing balance, {{ b.closing_btc }}, equals the opening balance{% if not r.wallets and not r.reconciliation.ok %} <span class="bad">but the holdings on the chain differ by {{ r.reconciliation.diff_sat | btc | acct }}</span>{% endif %}.</p>{% endif %}
 </div>
 {% endfor %}
-<p class="small muted">{% if r.wallets %}The wallets' closing balances add up to the closing holdings of section 2, {{ r.closing.total_btc }}{% if not r.reconciliation.ok %}; <span class="bad">the running balances differ from the holdings on the chain by {{ r.reconciliation.diff_sat | btc | acct }}</span>{% endif %}. A move between the holder's wallets appears in both, under the same transaction: sent by the one, received by the other, the fee with the sender. {% endif %}A movement names its transaction by the first sixteen characters of its id, which {{ r.name | default("report") }}.json and the CSV carry whole{% if explorer %} and which links to the transaction on the explorer{% endif %}; a UTXO of section 2 is named, whole, by the transaction that created it.{% if r.totals.mixed_count %} A joint transaction was funded by others too: its fee is unknown and its amount is the {{ who }}'s net.{% endif %}{% if r.fiat %} {{ r.fiat.currency }} under each amount, at the rate in force on the transaction's day.{% endif %}</p>
+<p class="small muted">{% if r.wallets %}The wallets' closing balances add up to the closing holdings of section 2, {{ r.closing.total_btc }}{% if not r.reconciliation.ok %}; <span class="bad">the running balances differ from the holdings on the chain by {{ r.reconciliation.diff_sat | btc | acct }}</span>{% endif %}. A move between the holder's wallets appears in both, under the same transaction: sent by the one, received by the other, the fee with the sender. {% endif %}Each movement carries the id of its transaction{% if explorer %}, linked to the explorer{% endif %}; a UTXO of section 2 is named by the transaction that created it.{% if r.totals.mixed_count %} A joint transaction was funded by others too: its fee is unknown and its amount is the {{ who }}'s net.{% endif %}{% if r.fiat %} {{ r.fiat.currency }} under each amount, at the rate in force on the transaction's day.{% endif %}</p>
 
 <div class="page">
 <h2><span class="n">2.</span> Holdings at the end of the period · {{ r.period.end.time_utc | utc }}</h2>
