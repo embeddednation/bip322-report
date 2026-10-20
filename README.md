@@ -3,10 +3,10 @@
 The statement of a period, in which every coin is backed by a verified BIP-322
 proof of control. Built on [bip322-audit](https://github.com/embeddednation/bip322-audit)
 (the snapshots and their proofs files) and [bip322-core](https://github.com/embeddednation/bip322-core)
-(the BIP-322 work), for the owner's side: it reads the node wallet's transaction
-history and the wallet's snapshots, and writes the statement of a period.
+(the BIP-322 work), for the owner's side: it reads the holder's node wallets'
+transaction histories and the wallets' snapshots, and writes the statement of a period.
 
-A statement answers, for a wallet and a period:
+A statement answers, for a holder and a period:
 
 * what the wallet held at the start and at the end (as of two block heights),
 * every movement in between, with the wallet's side of each transaction and the exact fee (unknown only when others funded the transaction too),
@@ -45,9 +45,9 @@ export PATH="$PWD/.venv/bin:$PATH"
 
 `setup.sh` installs the two packages from git at the tags named in the script
 (`CORE_REF`, `AUDIT_REF`); `./setup.sh --core ../bip322-core --audit ../bip322-audit`
-uses local checkouts, which is the development setup. Nothing here needs the
-wallet descriptor: the history comes from the node wallet, the proofs from the
-wallet's snapshots.
+uses local checkouts, which is the development setup. Nothing here needs a
+wallet descriptor: the histories come from the node wallets, the proofs from the
+wallets' snapshots.
 
 The PDF needs WeasyPrint's system libraries, then the renderer itself,
 hash-pinned like everything else:
@@ -63,27 +63,29 @@ to PDF from a browser), and `report` says so; `--html` asks for that.
 ## The flow
 
 ```sh
-# everything under company/treasury/ in the directory bip322 init made: the snapshots bip322-audit writes, the statements this writes.
+# everything under company/ in the directory bip322 init made: the snapshots bip322-audit writes in company/treasury/,
+# the statements this writes in company/statements/.
 # before broadcasting a spend: prove its change address
-bip322 audit prove bc1q...change...   # -> company/treasury/snapshots/<date>-<height>/
+bip322 audit prove bc1q...change...   # -> company/treasury/<date>-<height>/
 #   sign to_sign/*.psbt on the cosigners' devices, put the results in signed/, then
 bip322 audit finalize                 # the newest snapshot; valid -> broadcast
 # anything that arrived on addresses not yet proven (deposits):
 bip322 audit snapshot --skip-proven
 
-# the year's statement
-bip322 report --year 2026
-#   -> company/treasury/statements/2026/: treasury-2026.pdf (or .html), .json, .csv, the proofs files it cites,
-#      and treasury-2026-history.pdf: the movements for a reader, no proofs, no txids
+# the year's statement of the holder, over every wallet under company/
+bip322 report --year 2026             # or: bip322 report company --year 2026
+#   -> company/statements/2026/: company-2026.pdf (or .html), .json, .csv, the proofs files it cites,
+#      and company-2026-history.pdf: the movements for a reader, no proofs, no txids
 
-# the holder's ledger over every wallet under company/, from the first reception to now
-bip322 report holder company          # or: bip322 report company
-#   -> company/statements/2026-10-15/: company-2026-10-15.pdf (or .html), .json, .csv, the proofs files it cites, and -history.pdf
+# the same from the first reception to now, for a source-of-funds question
+bip322 report company
+#   -> company/statements/2026-10-15/, labelled by the tip's date
 ```
 
-The wallet is `-w NAME`, else the wallet directory the command runs in, else
-`wallet` in `bip322.toml`, else the node's one loaded wallet; `-o DIR` writes the
-statement elsewhere, `--dir DIR` names the data directory from elsewhere. The tree and the configuration file are described in bip322-audit's README and the
+The holder is the word after the options, else the holder whose directory the
+command runs in, else `holder` in `bip322.toml`, else the tree's one; `-o DIR`
+writes the statement elsewhere, `--dir DIR` names the data directory from
+elsewhere; `-w NAME` names a wallet for `history` and `balance`. The tree and the configuration file are described in bip322-audit's README and the
 handbook; the keys this package reads are `holder`, `wallet`, `cli`,
 `dust`, `theme`, `heading`, `explorer`, `node` per wallet, `name` per holder, and the
 `[addresses]` table: the wallet each address of someone else belongs to
@@ -91,15 +93,15 @@ handbook; the keys this package reads are `holder`, `wallet`, `cli`,
 wallets of the tree name their own addresses, so a move between two of them
 needs no entry.
 A holder is a directory of the tree with its wallets' directories under it;
-`[holders.KEY]` gives its `name` for the statements' header, and any other
+`[holders.KEY]` gives its `name` for the statement's header, and any other
 key there (`dust`, `theme`, …) is a default for the holder's wallets, between
-the wallet's own table and the top level. `bip322 report
-holder KEY` merges its wallets' histories into one ledger, a transfer between
-two of them one movement of kind `transfer`, the balance the holder's total,
-each wallet's share under the opening and the closing holdings on the first
-page and its movements a block of their own, under `KEY/statements/<label>/`;
-its CSV is one block per wallet, under the wallet's name, as that wallet sees
-the movements. Every history read is kept
+the wallet's own table and the top level. The statement merges the wallets'
+histories into one, a transfer between two of them one movement of kind
+`transfer`, the balance the holder's total, each wallet's share under the
+opening and the closing holdings on the first page and its movements a block
+of their own; its CSV is one block per wallet, under the wallet's name, as
+that wallet sees the movements. A holder of one wallet gets the same document
+without the split, and the CSV that wallet's rows. Every history read is kept
 in the wallet's directory as `history.json`, and a wallet the node has not
 loaded any more is read from that file, provided it held nothing at the
 file's tip.
@@ -137,18 +139,18 @@ error.
 bip322 report [--cli CMD] [-w NAME] history [-o history.json]
 bip322 report [--cli CMD]           block WHEN
 bip322 report [--cli CMD] [-w NAME] balance [--at WHEN | --height H] [--history FILE]
-bip322 report [--cli CMD] [-w NAME] (--year Y | --from WHEN --to WHEN | --from-height H --to-height H)
-                                     [--snapshots DIR]... [--holder NAME] [--history FILE]
+bip322 report [--cli CMD]           [HOLDER] [--year Y | --from WHEN --to WHEN | --from-height H --to-height H]
+                                     [--snapshots DIR]...
                                      [--rates CSV | --rate N] [--currency CODE] [--dust SATS [--dust-force]] [--explorer URL] [--html] [--theme journal|light|paper|dark] [--heading STYLE] [-o DIR]
-bip322 report [--cli CMD]           holder [KEY] [period as above] [statement options as above]
 bip322 report help [COMMAND]
 ```
 
 The statement is the default command (`report` names it explicitly, as in `help report`).
 
-* `history` reads every transaction of the node wallet once and writes it as
-  JSON; `balance` and `report` accept it with `--history`, so reports can be
-  regenerated without the wallet, or exactly reproduced from the same data.
+* `history` reads every transaction of a node wallet once and writes it as
+  JSON, and keeps it in the wallet's directory when the wallet is one of the
+  tree; `balance` accepts it with `--history`, and the statement reads a
+  wallet the node has not loaded from the kept file.
   A history of another chain, or one whose tip block is not in the node's
   chain (a reorganisation, another network), is refused.
 * `block` resolves a UTC date or instant to the last block before it, the
@@ -159,7 +161,7 @@ The statement is the default command (`report` names it explicitly, as in `help 
   report exactly. The period is given one way only. When the end is in the
   past and the node has no block after it yet (still syncing, or behind), the
   closing block is not settled and `report` refuses.
-* The proofs come from the wallet's `snapshots/`. `--snapshots DIR` takes
+* The proofs come from the wallets' directories under the holder's. `--snapshots DIR` takes
   them from elsewhere instead: a directory of snapshots, one snapshot or one
   proofs file, and may repeat. A path that does not exist or holds no
   proofs file is an error, so a mistyped path does not read as "no proofs".
@@ -181,9 +183,10 @@ totals, right-aligned tabular figures with all eight decimals, a running
 balance in the movements table, a reference number on every page, and a
 section on the basis of preparation and its limitations (point in time,
 control is not title, completeness rests on the holder's representation).
-The wallet is named by the node wallet's name; `--holder NAME` puts the holder's name in the header. Sections 1 and 2 are kept whole when they fit on a page.
-A holder's ledger and a wallet's statement are the same document; the ledger
-has a table of the holder's wallets and names the wallet in each movement.
+The holder is named as `[holders.KEY]` says, else by its directory. Sections 1 and 2 are kept whole when they fit on a page.
+A holder of several wallets gets each wallet's share on the first page and a
+block of movements per wallet; a holder of one wallet the same document
+without the split.
 
 * Period: the instants asked for and the two blocks they resolved to.
 * First, the summary: the opening holdings, what was received from others,
@@ -301,13 +304,13 @@ files it cites carry none either. A proofs file is cited by its own name,
 `<wallet>-<date>-<height>-proofs.json`, never by a path; a file still named
 `proofs.json` (earlier versions) is named after its snapshot directory, and
 two files that would share a name are an error. Only the proofs files cited
-on a closing UTXO's page are listed; whatever else the wallet's snapshots
+on a closing UTXO's page are listed; whatever else the wallets' snapshots
 hold (older ones, another wallet's given with `--snapshots`) appears as a
 bare count.
 
 **What to hand over:** the statement directory,
-`<holder>/<wallet>/statements/<label>/` in the data directory. Four kinds of file and nothing
-else: `<wallet>-<label>.pdf` (or `.html`), `.json`, `.csv`, and a copy of
+`<holder>/statements/<label>/` in the data directory. Four kinds of file and nothing
+else: `<holder>-<label>.pdf` (or `.html`), `.json`, `.csv`, and a copy of
 each proofs file the statement cites, and no other, under its own name, so
 a reader can run `bip322 audit verify` on each. Never hand over the
 snapshots: their PSBT files carry the wallet's xpubs. `--no-proofs` skips

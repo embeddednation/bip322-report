@@ -1,10 +1,12 @@
-"""``bip322-report``: the statement of a period, backed by verified BIP-322 proofs, from the owner's node wallet.
+"""``bip322-report``: the statement of a period for a holder, over every wallet under it, backed by verified BIP-322 proofs.
 
-The statement goes to ``<wallet>/statements/<label>/`` in the data directory (the one ``bip322 init``
-made at or above the current directory; ``--dir`` or ``BIP322_DIR`` name another) as ``<wallet>-<label>.pdf``
-(``.html`` where the PDF cannot be made), ``.json``, ``.csv``, and a copy of each proofs file it cites;
-the proofs come from ``<wallet>/snapshots/``.  ``-w`` names the wallet, else the wallet directory the
-command runs in does, else ``bip322.toml``, else the node's one loaded wallet is it.
+The statement goes to ``<holder>/statements/<label>/`` in the data directory (the one ``bip322 init``
+made at or above the current directory; ``--dir`` or ``BIP322_DIR`` name another) as ``<holder>-<label>.pdf``
+(``.html`` where the PDF cannot be made), ``.json``, ``.csv``, ``-history.pdf``, and a copy of each proofs file
+it cites.  The histories come from the holder's node wallets (or the ``history.json`` kept in a wallet's
+directory, for a wallet the node has not loaded), the proofs from the snapshots in the wallets' directories
+under ``<holder>/``.  The holder is the word after the options, else the current directory's, else ``holder``
+in ``bip322.toml``, else the tree's one.  ``-w`` names a wallet for ``history`` and ``balance``.
 """
 
 from __future__ import annotations
@@ -17,16 +19,14 @@ from pathlib import Path
 
 from bip322audit.audit import AuditError
 from bip322audit.datadir import (
+    HISTORY_FILE,
     Config,
     ConfigError,
     holder_dir,
     holder_of_cwd,
-    holder_of_wallet,
     holder_statements_dir,
     holders,
     name_wallet,
-    snapshots_dir,
-    statements_dir,
     use_data_dir,
     wallet_dir,
     wallet_dirs,
@@ -110,9 +110,6 @@ def _history(args, cli: BitcoinCli) -> History:
     return fetch_history(cli, progress=_progress)
 
 
-HISTORY_FILE = "history.json"  # in a wallet's directory: the history last read from the node, for when the wallet is not loaded
-
-
 def _saved_history(wallet: str) -> Path | None:
     """The wallet's ``history.json`` in the tree, when the wallet is a wallet of the tree."""
     with contextlib.suppress(ConfigError):
@@ -183,7 +180,7 @@ def _period_given(args) -> bool:
 
 
 def _whole_life(cli: BitcoinCli, history: History) -> Period:
-    """From the block before the first transaction to the history's tip, labelled by the tip's date: the ledger to date."""
+    """From the block before the first transaction to the history's tip, labelled by the tip's date: the statement to date."""
     first = min((tx.height for tx in history.txs if tx.height is not None), default=history.tip_height)
     end = block(cli, history.tip_height)
     return Period(end.iso_time[:10], block(cli, max(first - 1, 0)), end, None, None, True)
@@ -207,8 +204,8 @@ def _period_label(args) -> str:
     return f"{args.from_height}..{args.to_height}"
 
 
-def _proofs_roots(args, wallet: str | None) -> list[Path]:
-    """Where the proofs come from: the --snapshots paths, each holding a snapshot, or the wallet's own snapshots directory.
+def _proofs_roots(args, members: list[str]) -> list[Path]:
+    """Where the proofs come from: the --snapshots paths, each holding a snapshot, or the holder's wallets' directories.
 
     A mistyped --snapshots path must not look like a wallet without proofs.
     """
@@ -220,7 +217,7 @@ def _proofs_roots(args, wallet: str | None) -> list[Path]:
             if not find_proofs([root]) and not pending_snapshots([root]):  # snapshots awaiting signatures count
                 raise CLIError(f"--snapshots {root}: no proofs file in it")
     else:
-        roots = [snapshots_dir(wallet)] if wallet is not None and snapshots_dir(wallet).is_dir() else []
+        roots = [wallet_dir(w) for w in members]
     proofs_names([path for path, _ in find_proofs(roots)])  # refuses two files under one name before any work
     return roots
 
@@ -239,11 +236,6 @@ def _pdf_possible() -> bool:
     except Exception:  # ImportError, or an OSError when its system libraries (Pango) are missing
         return False
     return True
-
-
-def _file_stem(wallet: str, period_label: str) -> str:
-    """``<wallet>-<label>``: the name the statement's files carry wherever they end up."""
-    return f"{wallet}-{period_label}".replace(" ", "_").replace("/", "_")
 
 
 # --------------------------------------------------------------------------- #
@@ -334,34 +326,6 @@ def _dust(args, config: Config, wallet: str | None, *, holder: str | None = None
     return dust
 
 
-def _report_history(args, cli: BitcoinCli, config: Config, wallet: str | None, period_label: str) -> tuple[History, str, Path]:
-    """The history the statement is made from, checked against the node; the wallet's name; and the directory the statement goes to."""
-    if not args.output and not args.history:
-        # the default directory is named after the wallet: one call to learn the name before the long read of its history
-        with contextlib.suppress(RpcError, KeyError, TypeError, ConfigError):  # no wallet: fetch_history says so better
-            early = wallet or config.wallet_of_node(str(cli.call("getwalletinfo")["walletname"]))
-            _check_directory(statements_dir(early) / period_label, args.force)
-    if args.history:
-        history, source = History.load(Path(args.history)), None
-    else:
-        history, source = _wallet_history(args, config, wallet, cli)
-    if wallet is None and history.wallet is not None:
-        wallet = config.wallet_of_node(str(history.wallet))
-    if wallet is None:
-        raise CLIError("no wallet name for the statement: -w NAME (or wallet = NAME in bip322.toml)")
-    directory = Path(args.output) if args.output else statements_dir(wallet) / period_label
-    _check_directory(directory, args.force)
-    if args.history:
-        _check_history(cli, history, args.history)
-    elif source["source"] == "node":
-        _save_history(wallet, history, member_only=bool(args.output))  # a statement in the tree makes the wallet a wallet of it
-    else:
-        cli.argv[:] = [a for a in cli.argv if not a.startswith("-rpcwallet=")]  # the wallet is not loaded: the node alone from here
-    if history.wallet and not any(a.startswith("-rpcwallet=") for a in cli.argv) and (args.history or source["source"] == "node"):
-        cli.argv.append(f"-rpcwallet={history.wallet}")  # a cached history knows its wallet; the node cross-check needs it
-    return history, wallet, directory
-
-
 def _period(args, cli: BitcoinCli, history: History, period_label: str) -> Period:
     """The period's opening and closing blocks, resolved on the node; never beyond the history."""
     # a period that runs to the tip closes on the history's own tip: a block that arrived since the history was read is not in it
@@ -388,97 +352,19 @@ def _copy_proofs(report: dict, roots: list[Path], directory: Path) -> None:
 
 
 def cmd_report(args) -> int:
+    """The holder's statement: every wallet under its directory, their histories merged, for the period, or to date."""
     # what can be refused without the node is refused first: nothing is read, verified or written for a command that cannot finish
-    period_label = _period_label(args)
-    config = Config.load()
-    wallet = _wallet_name(args, config)
-    dust = _dust(args, config, wallet)
-    rates = _rates(args)
-    theme = _theme(args, config, wallet)
-    pdf = not args.html and _pdf_possible()
-    roots = _proofs_roots(args, wallet) if args.snapshots else None  # a given path is checked before any work
-    if args.output:
-        _check_directory(Path(args.output), args.force)
-
-    cli = _cli(args, config, wallet)
-    history, wallet, directory = _report_history(args, cli, config, wallet, period_label)
-    if roots is None:
-        roots = _proofs_roots(args, wallet)
-    period = _period(args, cli, history, period_label)
-    names = _names(args, config, history, period, [wallet])
-    report = build_report(
-        history,
-        period,
-        label=wallet,
-        holder=config.holder_name(holder_of_wallet(wallet)),
-        proofs_roots=roots,
-        cli=cli,
-        rates=rates,
-        engines=_engines(args),
-        progress=_progress,
-        dust_sat=dust,
-        addresses=names,
-        node_check=any(a.startswith("-rpcwallet=") for a in cli.argv),  # not for a wallet the node has not loaded
-    )
-    report["previous"] = previous_statement(_archive(statements_dir, wallet), report)
-    return _write_statement(args, config, wallet, report, directory, _file_stem(wallet, period_label), roots, history.chain, theme, pdf)
-
-
-def _archive(where, key: str) -> Path | None:
-    """The wallet's or the holder's ``statements/`` in the tree, where the statement before this one is; None outside a tree."""
-    try:
-        return where(key)
-    except ConfigError:
-        return None
-
-
-def _write_statement(
-    args,
-    config: Config,
-    wallet: str | None,
-    report: dict,
-    directory: Path,
-    stem: str,
-    roots,
-    chain: str,
-    theme: str,
-    pdf: bool,
-    *,
-    holder: str | None = None,
-) -> int:
-    """The JSON, the CSV, the proofs files cited and the PDF (or HTML) into the directory, the summary on stderr, the directory on stdout."""
-    report["name"] = stem
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / f"{stem}.json").write_text(json.dumps(report, indent=2, default=str) + "\n")
-    write_csv(report, directory / f"{stem}.csv")
-    if not args.no_proofs and roots:
-        _copy_proofs(report, roots, directory)
-    print(format_summary(report), file=sys.stderr)
-    explorer = _setting(args, config, "explorer", "explorer", wallet, holder=holder)
-    if explorer is None:
-        explorer = EXPLORER if chain == "main" else None
-    heading = _setting(args, config, "heading", "heading", wallet, holder=holder)
-    if pdf:  # last: should the rendering fail, everything else is in place
-        write_pdf(render_html(report, explorer=explorer, theme=theme, heading=heading, fonts_url=PACKAGE_FONTS), directory / f"{stem}.pdf")
-        write_pdf(render_history_html(report, theme=theme, heading=heading, fonts_url=PACKAGE_FONTS), directory / f"{stem}-history.pdf")
-    else:
-        if not args.html:
-            print(f"no PDF (WeasyPrint is not installed or lacks Pango): the statement is {stem}.html", file=sys.stderr)
-        (directory / f"{stem}.html").write_text(render_html(report, explorer=explorer, theme=theme, heading=heading))
-        (directory / f"{stem}-history.html").write_text(render_history_html(report, theme=theme, heading=heading))
-    print(str(directory))
-    return 0 if report["ok"] else 1
-
-
-def cmd_holder(args) -> int:
-    """The holder's ledger: every wallet of the holder, merged, from the first reception to the tip unless a period is given."""
+    if _opt(args, "wallet"):
+        raise CLIError(
+            "the statement is the holder's, over every wallet under it: bip322 report [HOLDER]; -w names a wallet for history and balance"
+        )
     config = Config.load()
     found = holders()
     key = args.key or holder_of_cwd() or config.default_holder
     if key is None:
         if len(found) != 1:
             raise CLIError(
-                "which holder? bip322 report holder KEY" + (f" (holders here: {', '.join(found)})" if found else ": none in the tree yet")
+                "which holder? bip322 report HOLDER" + (f" (holders here: {', '.join(found)})" if found else ": none in the tree yet")
             )
         key = found[0]
     members = sorted(w for w, path in wallet_dirs().items() if path.parent.name == key) if key in found else []
@@ -487,16 +373,16 @@ def cmd_holder(args) -> int:
             f"no wallet under {holder_dir(key)} yet: the first snapshot of a wallet under it makes it"
             + (f" (holders here: {', '.join(found)})" if found else "")
         )
-    name, slug = config.holder_name(key), key
     period_label = _period_label(args) if _period_given(args) else None
     dust = _dust(args, config, None, holder=key)
     rates = _rates(args)
     theme = _theme(args, config, None, holder=key)
     pdf = not args.html and _pdf_possible()
-    roots = [snapshots_dir(w) for w in members if snapshots_dir(w).is_dir()]
-    proofs_names([path for path, _ in find_proofs(roots)])  # refuses two files under one name before any work
+    roots = _proofs_roots(args, members)  # a given path is checked before any work
     if args.output:
         _check_directory(Path(args.output), args.force)
+    elif period_label:
+        _check_directory(holder_statements_dir(key) / period_label, args.force)  # the default directory is known before the long read
 
     histories: dict[str, History] = {}
     sources: dict[str, dict] = {}
@@ -515,7 +401,7 @@ def cmd_holder(args) -> int:
     report = build_report(
         history,
         period,
-        label=name,
+        label=config.holder_name(key),
         proofs_roots=roots,
         cli=cli,
         rates=rates,
@@ -527,8 +413,35 @@ def cmd_holder(args) -> int:
         sources=sources,
         node_check=False,
     )
-    report["previous"] = previous_statement(_archive(holder_statements_dir, key), report)
-    return _write_statement(args, config, None, report, directory, f"{slug}-{period.label}", roots, history.chain, theme, pdf, holder=key)
+    report["previous"] = previous_statement(holder_statements_dir(key), report)
+    return _write_statement(args, config, key, report, directory, f"{key}-{period.label}", roots, history.chain, theme, pdf)
+
+
+def _write_statement(
+    args, config: Config, holder: str, report: dict, directory: Path, stem: str, roots, chain: str, theme: str, pdf: bool
+) -> int:
+    """The JSON, the CSV, the proofs files cited and the PDF (or HTML) into the directory, the summary on stderr, the directory on stdout."""
+    report["name"] = stem
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{stem}.json").write_text(json.dumps(report, indent=2, default=str) + "\n")
+    write_csv(report, directory / f"{stem}.csv")
+    if not args.no_proofs and roots:
+        _copy_proofs(report, roots, directory)
+    print(format_summary(report), file=sys.stderr)
+    explorer = _setting(args, config, "explorer", "explorer", None, holder=holder)
+    if explorer is None:
+        explorer = EXPLORER if chain == "main" else None
+    heading = _setting(args, config, "heading", "heading", None, holder=holder)
+    if pdf:  # last: should the rendering fail, everything else is in place
+        write_pdf(render_html(report, explorer=explorer, theme=theme, heading=heading, fonts_url=PACKAGE_FONTS), directory / f"{stem}.pdf")
+        write_pdf(render_history_html(report, theme=theme, heading=heading, fonts_url=PACKAGE_FONTS), directory / f"{stem}-history.pdf")
+    else:
+        if not args.html:
+            print(f"no PDF (WeasyPrint is not installed or lacks Pango): the statement is {stem}.html", file=sys.stderr)
+        (directory / f"{stem}.html").write_text(render_html(report, explorer=explorer, theme=theme, heading=heading))
+        (directory / f"{stem}-history.html").write_text(render_history_html(report, theme=theme, heading=heading))
+    print(str(directory))
+    return 0 if report["ok"] else 1
 
 
 # --------------------------------------------------------------------------- #
@@ -590,12 +503,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="bip322-report",
         description=(
-            "The statement of a period: holdings and movements in which every coin is backed by a verified BIP-322 proof of "
-            f"control, from the owner's node wallet ({SPEC}). With no command the statement is made: "
-            "bip322-report [--cli CMD] [-w NAME] (--year Y | --from WHEN --to WHEN | --from-height H --to-height H) [options]. "
-            "It goes to <holder>/<wallet>/statements/<label>/ in the data directory and its proofs come from <holder>/<wallet>/snapshots/ there: "
-            "the directory bip322 init made at or above the current one (--dir or BIP322_DIR name another), whose bip322.toml "
-            "holds the defaults."
+            "The statement of a period for a holder: the holdings and movements of every wallet under it, in which every coin is "
+            f"backed by a verified BIP-322 proof of control, from the owner's node ({SPEC}). With no command the statement is made: "
+            "bip322-report [--cli CMD] [HOLDER] [--year Y | --from WHEN --to WHEN | --from-height H --to-height H] [options]. "
+            "It goes to <holder>/statements/<label>/ in the data directory and its proofs come from the wallets' directories under "
+            "<holder>/ there: the directory bip322 init made at or above the current one (--dir or BIP322_DIR name another), whose "
+            "bip322.toml holds the defaults."
         ),
     )
     parser.add_argument("--version", action="version", version=f"{TOOL} ({SPEC})")
@@ -610,9 +523,10 @@ def build_parser() -> argparse.ArgumentParser:
         "-w",
         default=None,
         metavar="NAME",
-        help="the wallet: its directory NAME in the data directory, under whichever holder it is (KEY/NAME: the holder a new one goes "
-        "under), and the node wallet of that name (or the one its [wallets.NAME] table names as node). Default: the wallet directory "
-        "the command runs in, else wallet in bip322.toml, else the node's one loaded wallet. May also follow the command.",
+        help="the wallet, for history and balance: its directory NAME in the data directory, under whichever holder it is (KEY/NAME: "
+        "the holder a new one goes under), and the node wallet of that name (or the one its [wallets.NAME] table names as node). "
+        "Default: the wallet directory the command runs in, else wallet in bip322.toml, else the node's one loaded wallet. May also "
+        "follow the command.",
     )
     parser.add_argument(
         "--dir",
@@ -662,51 +576,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "report",
-        help="the statement for a period: <wallet>-<label>.pdf (or .html), .json, .csv, the proofs files it cites, and "
-        "<wallet>-<label>-history.pdf, the movements for a reader, "
-        "under the wallet's statements/<label>/; the default command",
+        help="the holder's statement for a period, or to date: <holder>-<label>.pdf (or .html), .json, .csv, the proofs files it "
+        "cites, and <holder>-<label>-history.pdf, the movements for a reader, under <holder>/statements/<label>/; the default command",
         description=(
-            "Opening and closing balances, every movement between them, a reconciliation, and for each closing output the BIP-322 proof of "
-            "control, from the wallet's snapshots, that lists it, re-verified against the node now. The period is a calendar year, two instants, or two "
-            "heights; opening figures are as of the start block, closing figures as of the end block. "
-            "The files go to <holder>/<wallet>/statements/<label>/ in the data directory, named <wallet>-<label>.pdf (.html where WeasyPrint is not "
-            "installed, or with --html), .json, .csv, and a copy of each proofs file the statement cites, under its own name. "
+            "One statement for a holder over every wallet under its directory: their histories merged, a move between two of them "
+            "one transaction (sent by the one, received by the other, its fee the only cost), opening and closing holdings with each "
+            "wallet's share, every movement between them, a reconciliation, and for each closing output the BIP-322 proof of control, "
+            "from the wallets' snapshots, that lists it, re-verified against the node now. The period is a calendar year, two instants, "
+            "or two heights; opening figures are as of the start block, closing figures as of the end block. Without a period the "
+            "statement runs from the block before the first transaction to the tip, labelled by the tip's date. "
+            "HOLDER is a directory of the tree, and may be left out inside its directory, with holder = KEY in bip322.toml, or when "
+            "the tree has one holder; [holders.KEY] in bip322.toml gives its name for the header. "
+            "The files go to <holder>/statements/<label>/ in the data directory, named <holder>-<label>.pdf (.html where WeasyPrint is "
+            "not installed, or with --html), .json, .csv (one block per wallet, as that wallet sees the movements), and a copy of each "
+            "proofs file the statement cites, under its own name. "
             "Exit status: 0 when the result is OK, 1 when it is ATTENTION, 2 on an error."
-        ),
-    )
-    _add_node_args(p)
-    _add_period_args(p)
-    p.add_argument(
-        "--snapshots",
-        metavar="DIR",
-        action="append",
-        help="take the proofs from here instead of the wallet's snapshots/: a directory of snapshots, one snapshot, or one proofs file; may repeat",
-    )
-    p.add_argument("--history", metavar="FILE", help="use this history.json instead of reading the node wallet")
-    _add_statement_args(p, "under the wallet's statements/")
-    p.set_defaults(
-        func=cmd_report,
-        examples=[
-            "--year 2026",
-            "-w treasury --year 2026 --dust 1000",
-            "-w treasury --from 2026-01-01 --to 2026-07-01 --rates sek.csv --currency SEK",
-            "--history history.json --from-height 900000 --to-height 912345 --snapshots DIR -o q3",
-        ],
-    )
-
-    p = sub.add_parser(
-        "holder",
-        help="the holder's ledger over all its wallets, from the first reception to now unless a period is given: "
-        "<holder>-<label>.pdf (or .html), .json, .csv, the proofs files it cites, and <holder>-<label>-history.pdf for a reader, "
-        "under <holder>/statements/<label>/",
-        description=(
-            "One statement for a holder with several wallets: their histories merged, a transfer between two of them one movement "
-            "(kind transfer, its fee the only cost), every coin with its wallet, the balance the holder's total. A holder is a directory "
-            "of the tree, KEY, and its wallets the wallet directories under it; [holders.KEY] in bip322.toml gives its name for the "
-            "header. KEY may be left out inside the holder's directory, with holder = KEY in bip322.toml, or when the tree has one holder. "
-            "Without a period the ledger runs from the block before the first transaction to the tip, labelled by the tip's date. The files "
-            "go to KEY/statements/<label>/ in the data directory, named KEY-<label>; the CSV is one block per wallet, under the "
-            "wallet's name, as that wallet sees the movements. Exit status as for report."
         ),
     )
     p.add_argument(
@@ -717,16 +601,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_node_args(p)
     _add_period_args(p)
+    p.add_argument(
+        "--snapshots",
+        metavar="DIR",
+        action="append",
+        help="take the proofs from here instead of the wallets' directories: a directory of snapshots, one snapshot, or one proofs file; may repeat",
+    )
     _add_statement_args(p, "under HOLDER/statements/")
     p.set_defaults(
-        func=cmd_holder,
-        examples=["holder", "holder company --year 2026", "holder company --rates sek.csv --currency SEK -o source-of-funds"],
+        func=cmd_report,
+        examples=[
+            "--year 2026",
+            "company --year 2026 --dust 1000",
+            "company --from 2026-01-01 --to 2026-07-01 --rates sek.csv --currency SEK",
+            "company -o source-of-funds",
+        ],
     )
 
     p = sub.add_parser("handbook", help="print the handbook: the yearly flow end to end, for the holder and for the auditor")
     p.set_defaults(func=cmd_handbook)
 
-    add_help_command("bip322-report", sub, {"Workflow": ["history", "block", "balance", "report", "holder", "handbook", "help"]})
+    add_help_command("bip322-report", sub, {"Workflow": ["history", "block", "balance", "report", "handbook", "help"]})
     return parser
 
 
@@ -736,7 +631,7 @@ def cmd_handbook(args) -> int:
     return 0
 
 
-COMMANDS = ("history", "block", "balance", "report", "holder", "handbook", "help")
+COMMANDS = ("history", "block", "balance", "report", "handbook", "help")
 _GLOBAL_WITH_VALUE = ("--cli", "--wallet", "-w", "--dir")
 
 
@@ -744,10 +639,9 @@ def with_default_command(argv: list[str]) -> list[str]:
     """``bip322-report OPTIONS`` is ``bip322-report report OPTIONS``: the statement is what the command is for.
 
     The first word after the global options decides: a command name, or
-    ``-h``/``--help``/``--version``, is left alone; a holder of the tree
-    (``bip322 report company``) gets ``holder`` put before it; anything else
-    (an option of the statement, or nothing at all) gets ``report``.  No
-    argument at all lists the commands.
+    ``-h``/``--help``/``--version``, is left alone; anything else (a holder,
+    ``bip322 report company``, an option of the statement, or nothing at all)
+    gets ``report``.  No argument at all lists the commands.
     """
     i = 0
     while i < len(argv):
@@ -759,22 +653,8 @@ def with_default_command(argv: list[str]) -> list[str]:
         elif tok in COMMANDS or tok in ("-h", "--help", "--version"):
             return argv
         else:
-            return [*argv[:i], "holder" if _is_holder(tok, argv[:i]) else "report", *argv[i:]]
+            return [*argv[:i], "report", *argv[i:]]
     return [*argv, "report"] if argv else ["help"]
-
-
-def _is_holder(word: str, options: list[str]) -> bool:
-    """Whether a bare word names a holder of the tree (``--dir`` among the options before it applies); never an error."""
-    if word.startswith("-"):
-        return False
-    with contextlib.suppress(ConfigError, OSError, ValueError):
-        for n, tok in enumerate(options):
-            if tok == "--dir" and n + 1 < len(options):
-                use_data_dir(options[n + 1])
-            elif tok.startswith("--dir="):
-                use_data_dir(tok.removeprefix("--dir="))
-        return word in holders()
-    return False
 
 
 def main(argv: list[str] | None = None) -> int:

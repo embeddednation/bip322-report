@@ -1,6 +1,8 @@
 """bip322-report against a fake node: history, balances, periods, proof coverage, rendering, CLI."""
 
 import json
+import os
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -250,53 +252,40 @@ def test_cli_end_to_end_with_fake_node(tmp_path, wallet, signer_expressions, mon
     assert cli_module.main(["balance", "--at", "2023-11-21T10:00:00Z"]) == 0
     assert json.loads(capsys.readouterr().out)["block"]["height"] == last_block_before(node, parse_when("2023-11-21T10:00:00Z")).height
 
+    member = Path(os.environ["BIP322_DIR"]) / "h" / "watch"  # a wallet of the tree, under the fixture's holder h
+    member.mkdir(parents=True)
+    shutil.copy("history.json", member / "history.json")
     assert (
-        cli_module.main(
-            [
-                "report",
-                "--history",
-                "history.json",
-                "--from-height",
-                "1000",
-                "--to-height",
-                "1012",
-                "--snapshots",
-                str(ledger),
-                "-o",
-                "out",
-            ]
-        )
+        cli_module.main(["report", "--from-height", "1000", "--to-height", "1012", "--snapshots", str(ledger), "-o", "out"])
         == 1  # ATTENTION: two closing outputs have no proof
     )
     out, err = capsys.readouterr()
     assert out.strip() == "out" and "RESULT: ATTENTION" in err and "proof coverage: 1/3" in err
-    written = json.loads(Path("out/watch-1000..1012.json").read_text())
+    written = json.loads(Path("out/h-1000..1012.json").read_text())
     assert (
-        written["label"] == "watch"
+        written["label"] == "h"
         and not written["coverage"]["complete"]
-        and Path("out/watch-1000..1012.html").exists()
-        and Path("out/watch-1000..1012.csv").exists()
+        and Path("out/h-1000..1012.html").exists()
+        and Path("out/h-1000..1012.csv").exists()
     )
     assert Path("out/one-proofs.json").read_bytes() == (ledger / "one" / "one-proofs.json").read_bytes()  # what the reader gets, no PSBTs
     assert not any(p.suffix == ".psbt" for p in Path("out").rglob("*")) and written["proofs_files"][0]["file"] == "one-proofs.json"
     assert sorted(p.name for p in Path("out").iterdir()) == [
+        "h-1000..1012-history.html",
+        "h-1000..1012.csv",
+        "h-1000..1012.html",
+        "h-1000..1012.json",
         "one-proofs.json",
-        "watch-1000..1012-history.html",
-        "watch-1000..1012.csv",
-        "watch-1000..1012.html",
-        "watch-1000..1012.json",
     ]
-    assert (
-        cli_module.main(["report", "--history", "history.json", "--from-height", "1000", "--to-height", "1012", "-o", "out"]) == 2
-    )  # not empty
+    assert cli_module.main(["report", "--from-height", "1000", "--to-height", "1012", "-o", "out"]) == 2  # not empty
     assert "not empty" in capsys.readouterr().err
-    assert cli_module.main(["report", "--history", "history.json", "--from-height", "1000", "-o", "x"]) == 2  # incomplete period
-    assert cli_module.main(["report", "--history", "history.json", "-o", "x"]) == 2
+    assert cli_module.main(["report", "--from-height", "1000", "-o", "x"]) == 2  # incomplete period
+    assert cli_module.main(["report", "-o", "x"]) == 1 and Path("x/h-2023-11-21.json").exists()  # no period: to date, by the tip's day
     # the fake chain lives in November 2023: with the clock set there, the year runs to the tip
     monkeypatch.setattr("bip322report.period._now", lambda: datetime.fromtimestamp(block_time(1012) + 60, UTC))
-    assert cli_module.main(["report", "--history", "history.json", "--year", "2023", "-o", "y", "--rate", "5", "--currency", "USD"]) == 1
+    assert cli_module.main(["report", "--year", "2023", "-o", "y", "--rate", "5", "--currency", "USD"]) == 1
     capsys.readouterr()
-    written = json.loads(Path("y/watch-2023.json").read_text())
+    written = json.loads(Path("y/h-2023.json").read_text())
     assert (
         written["period"]["label"] == "2023"
         and written["fiat"]

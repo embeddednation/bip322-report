@@ -1,6 +1,6 @@
 """Which proof covers which coin.
 
-The wallet's proofs files (under its ``snapshots/``, or wherever ``--snapshots``
+The wallets' proofs files (in their directories, or wherever ``--snapshots``
 points) are read and each is re-verified against the node at report time.  A
 coin is *covered* when a verified proof exists for its address: a BIP-322 proof
 is about the script behind an address, so it covers every output paid there,

@@ -262,7 +262,7 @@ SUMS = ("received", "sent", "fees", "mixed", "moved_in", "moved_out")
 
 def _wallets_totals(blocks: list[dict]) -> dict:
     """The holder's wallets added up.  Received and sent include what moved between the wallets (``moved_in``, which equals
-    ``moved_out``), sent by one and received by another, so they exceed the ledger's own received and sent by that much."""
+    ``moved_out``), sent by one and received by another, so they exceed the statement's own received and sent by that much."""
     totals = {}
     for key in ("opening", *SUMS, "amount", "closing"):
         sat = sum(b[f"{key}_sat"] for b in blocks)
@@ -378,10 +378,10 @@ def _wallet_side(tx: WalletTx, wallet: str, spent: bool, net: int, names: dict[s
     if not spent:  # paid by another wallet of the holder's, or by others
         return "receive", ", ".join(sorted({c.wallet for c in tx.ours_in if c.wallet}) if tx.ours_in else _named(names, tx.payers))
     if tx.mixed:
-        return "mixed", ", ".join(theirs + _named(names, tx.payers) + others)
+        return "mixed", ", ".join(dict.fromkeys(theirs + _named(names, tx.payers) + others))  # a wallet on both sides, named once
     if not tx.others_out:  # within the holder: its own wallet, or another of the holder's on the other side
         return ("internal", wallet) if not others else ("receive" if net > 0 else "send", ", ".join(others))
-    return "send", ", ".join(theirs + others)
+    return "send", ", ".join(dict.fromkeys(theirs + others))
 
 
 def _named(names: dict[str, str], addresses) -> list[str]:

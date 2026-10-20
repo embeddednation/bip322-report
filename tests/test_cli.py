@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from fake_node import FakeNode, block_time
+from test_holder import _Switch
 from test_report import _bundle, _node
 
 import bip322report.cli as cli_module
@@ -21,6 +22,7 @@ from bip322report.period import period_between, period_for_heights
 from bip322report.report import build_report, format_summary
 
 HEIGHTS = ["--from-height", "979", "--to-height", "1000"]  # the whole life of the fake wallet at tip 1000: aa, bb at a0, cc at a1
+STEM = "h-979..1000"  # the statement's files: the fixture's holder h, the period
 
 
 @pytest.fixture(scope="module")
@@ -43,7 +45,8 @@ def run(monkeypatch, tmp_path, capsys):
     monkeypatch.chdir(tmp_path)
 
     def go(node, *argv, pdf: bool = False):
-        monkeypatch.setattr(cli_module, "BitcoinCli", lambda command: node)
+        make = node if callable(node) else (lambda: node)  # a node, or a maker of one: fresh argv per BitcoinCli()
+        monkeypatch.setattr(cli_module, "BitcoinCli", lambda command: make())
         monkeypatch.setattr(cli_module, "_pdf_possible", lambda: pdf)  # the HTML, not a PDF, unless a test says so
         code = cli_module.main([str(a) for a in argv])
         out, err = capsys.readouterr()
@@ -55,6 +58,16 @@ def run(monkeypatch, tmp_path, capsys):
 def _place(bundles: Path, target: Path, name: str) -> Path:
     shutil.copytree(bundles / name, target)
     return target
+
+
+def _member(node, name: str = "watch") -> Path:
+    """A wallet of the tree under the fixture's holder h, with its history kept as a statement leaves it."""
+    directory = Path(os.environ["BIP322_DIR"]) / "h" / name
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "history.json").write_text(json.dumps(fetch_history(node).to_dict()))
+    if hasattr(node, "calls"):
+        node.calls.clear()  # what the test's command asks the node is what counts
+    return directory
 
 
 def _written(directory: str, suffix: str) -> Path:
@@ -71,6 +84,7 @@ def _written(directory: str, suffix: str) -> Path:
 def test_proofs_files_are_cited_and_copied_under_their_own_names(bundles, wallet, run, tmp_path):
     """A proofs file has one name wherever it is: the statement cites it by that name and copies it beside itself under it."""
     node = _node(wallet, tip=1000)
+    _member(node)
     code, out, err = run(
         node, "report", *HEIGHTS, "--snapshots", bundles / "a0", "--snapshots", bundles / "a1" / "a1-proofs.json", "-o", "out"
     )
@@ -81,7 +95,7 @@ def test_proofs_files_are_cited_and_copied_under_their_own_names(bundles, wallet
     for name in ("a0", "a1"):
         assert Path(f"out/{name}-proofs.json").read_bytes() == (bundles / name / f"{name}-proofs.json").read_bytes()
     assert sorted(p.name for p in Path("out").iterdir()) == [
-        "a0-proofs.json", "a1-proofs.json", "watch-979..1000-history.html", "watch-979..1000.csv", "watch-979..1000.html", "watch-979..1000.json",
+        "a0-proofs.json", "a1-proofs.json", f"{STEM}-history.html", f"{STEM}.csv", f"{STEM}.html", f"{STEM}.json",
     ]  # fmt: skip
     cited = {c["proof"]["file"] for c in written["closing"]["coins"]}
     assert cited == {"a0-proofs.json", "a1-proofs.json"} and str(bundles) not in _written("out", ".json").read_text()  # never a path
@@ -97,6 +111,7 @@ def test_two_proofs_files_under_one_name_are_refused_and_an_old_proofs_json_is_n
         (bundles / "a1" / "a1-proofs.json").resolve(): "a1-proofs.json",
     }
     node = _node(wallet, tip=1000)
+    _member(node)
     code, _, err = run(node, "report", *HEIGHTS, "--snapshots", tmp_path / "old-style", "--snapshots", bundles / "a1", "-o", "out")
     assert code == 0, err
     assert Path("out/year-end-proofs.json").read_bytes() == (old / "proofs.json").read_bytes()
@@ -117,7 +132,9 @@ def test_only_proofs_files_the_statement_relies_on_are_listed_and_copied(bundles
     for name, address in (("foreign-pending", foreign), ("pending", wallet.derive(0).address)):
         (ledger / name).mkdir()
         (ledger / name / "snapshot.json").write_text(json.dumps({"addresses": [{"address": address}]}))
-    code, _, err = run(_node(wallet, tip=1000), "report", *HEIGHTS, "--snapshots", ledger, "-o", "out")
+    node = _node(wallet, tip=1000)
+    _member(node)
+    code, _, err = run(node, "report", *HEIGHTS, "--snapshots", ledger, "-o", "out")
     assert code == 0, err
     written = json.loads(_written("out", ".json").read_text())
     assert [(f["file"], f["used_for"]) for f in written["proofs_files"]] == [("full-proofs.json", 3)] and written[
@@ -143,7 +160,9 @@ def test_a_cited_proofs_file_that_does_not_verify_is_still_listed_and_copied(bun
     other = json.loads((bundles / "a0" / "a0-proofs.json").read_text())["proofs"][0]["signature"]
     document["proofs"][0]["signature"] = other  # a well-formed proof of another script
     (ledger / "a1" / "a1-proofs.json").write_text(json.dumps(document))
-    code, _, err = run(_node(wallet, tip=1000), "report", *HEIGHTS, "--snapshots", ledger, "-o", "out")
+    node = _node(wallet, tip=1000)
+    _member(node)
+    code, _, err = run(node, "report", *HEIGHTS, "--snapshots", ledger, "-o", "out")
     written = json.loads(_written("out", ".json").read_text())
     assert code == 1 and [(f["file"], f["verified"], f["used_for"]) for f in written["proofs_files"]] == [("a1-proofs.json", False, 1)]
     assert "NOT VERIFIED, used for 1" in err and Path("out/a1-proofs.json").exists() and written["proofs_files_not_used"] == 0
@@ -151,6 +170,7 @@ def test_a_cited_proofs_file_that_does_not_verify_is_still_listed_and_copied(bun
 
 def test_report_exits_0_when_ok_1_on_attention_2_on_error(bundles, wallet, run, capsys):
     """Packaging review: ``report`` always exited 0, so a script could not tell a clean statement from one that needs attention."""
+    _member(_node(wallet, tip=1000))
     assert run(_node(wallet, tip=1000), "report", *HEIGHTS, "--snapshots", bundles / "full", "-o", "ok")[0] == 0
     code, out, err = run(_node(wallet, tip=1000), "report", *HEIGHTS, "-o", "attention")  # no proofs at all
     assert code == 1 and "RESULT: ATTENTION" in err and out.strip() == "attention" and _written("attention", ".json").exists()
@@ -167,13 +187,14 @@ def test_report_help_describes_dust_the_default_directory_and_the_explorer_as_th
         cli_module.main(["report", "--help"])
     text = " ".join(capsys.readouterr().out.split())
     assert "left out of every figure" in text and "counted in the balance" not in text and "change and consolidations never are" in text
-    assert "named <wallet>-<label>.pdf" in text and "report-<label>" not in text
+    assert "named <holder>-<label>.pdf" in text and "report-<label>" not in text
     assert "on mainnet, none on other chains" in text  # finding 24
 
 
 def test_dust_threshold_is_bounded(wallet, run):
     """Finding 3: --dust -5 was silently no dust, and --dust 100000000 an empty statement with RESULT: OK."""
     node = _node(wallet, tip=1000)
+    _member(node)
     code, _, err = run(node, "report", *HEIGHTS, "--dust", "-5", "-o", "d")
     assert code == 2 and "cannot be negative" in err and len(err.splitlines()) == 1
     code, _, err = run(node, "report", *HEIGHTS, "--dust", "10001", "-o", "d")
@@ -186,11 +207,11 @@ def test_dust_threshold_is_bounded(wallet, run):
 def test_options_that_contradict_or_point_nowhere_are_refused_before_any_work(bundles, wallet, run, tmp_path):
     """Finding 17: conflicting period options ran the year, --rate beside --rates was ignored, a mistyped --snapshots looked like "no proofs"."""
     node = _node(wallet, tip=1000)
+    _member(node)
     refused = [
         (["--year", "2023", *HEIGHTS], "give the period one way"),
         (["--year", "2023", "--from", "2020-01-01", "--to", "2021-01-01"], "give the period one way"),
         ([*HEIGHTS, "--to", "2021-01-01"], "give the period one way"),
-        ([], "give the period one way"),
         (["--from", "2020-01-01"], "--from and --to go together"),
         (["--to-height", "1000"], "--from-height and --to-height go together"),
         ([*HEIGHTS, "--rate", "5", "--rates", "r.csv"], "--rates and --rate exclude each other"),
@@ -202,19 +223,19 @@ def test_options_that_contradict_or_point_nowhere_are_refused_before_any_work(bu
         code, out, err = run(node, "report", *argv, "-o", "never")
         assert code == 2 and message in err and len(err.splitlines()) == 1 and out == "", (argv, err)
     assert node.calls == [] and not Path("never").exists()
-    # the output directory is looked at before the node is asked anything; the default one as soon as the wallet's name is known
+    # the output directory is looked at before the node is asked anything, the default one too: the holder is known from the tree
     Path("taken").mkdir()
     Path("taken/file").write_text("x")
     code, _, err = run(node, "report", *HEIGHTS, "--snapshots", bundles / "full", "-o", "taken")
     assert code == 2 and "taken exists and is not empty" in err and node.calls == []
-    default = tmp_path / "bip322" / "h" / "watch" / "statements" / "979..1000"  # the data directory: BIP322_DIR, set per test
+    default = tmp_path / "bip322" / "h" / "statements" / "979..1000"  # the data directory: BIP322_DIR, set per test
     default.mkdir(parents=True)
     (default / "file").write_text("x")
     code, _, err = run(node, "report", *HEIGHTS)
-    assert code == 2 and f"{default} exists and is not empty" in err and [c[0] for c in node.calls] == ["getwalletinfo"]
-    node.calls.clear()
-    assert run(node, "-w", "watch", "report", *HEIGHTS)[0] == 2 and node.calls == []
-    assert run(node, "report", *HEIGHTS, "--force")[0] == 1 and (default / "watch-979..1000.json").exists()
+    assert code == 2 and f"{default} exists and is not empty" in err and node.calls == []
+    code, _, err = run(node, "-w", "watch", "report", *HEIGHTS)  # the statement is the holder's: a wallet is not what it takes
+    assert code == 2 and "-w names a wallet for history and balance" in err and node.calls == []
+    assert run(node, "report", *HEIGHTS, "--force")[0] == 1 and (default / f"{STEM}.json").exists()
     # snapshots awaiting signatures count as snapshots: not an error, and the statement says what is awaited
     waiting = tmp_path / "waiting" / "snapshot-1"
     waiting.mkdir(parents=True)
@@ -226,6 +247,7 @@ def test_options_that_contradict_or_point_nowhere_are_refused_before_any_work(bu
 def test_bad_rates_give_one_line_with_file_and_line(wallet, run, tmp_path):
     """Finding 15: --rate abc raised InvalidOperation, a one-column rates row IndexError."""
     node = _node(wallet, tip=1000)
+    _member(node)
     code, _, err = run(node, "report", *HEIGHTS, "--rate", "abc", "-o", "r")
     assert code == 2 and err == "error: the rate: 'abc' is not a rate (a positive number per BTC)\n" and node.calls == []
     rates = tmp_path / "rates.csv"
@@ -248,6 +270,7 @@ def test_bad_rates_give_one_line_with_file_and_line(wallet, run, tmp_path):
 def test_a_malformed_proofs_file_is_left_out_with_one_line_not_a_traceback(bundles, wallet, run, tmp_path):
     """Finding 15: a proofs file that find_proofs accepts but that lacks a message raised KeyError; now unusable, said so, backs nothing."""
     node = _node(wallet, tip=1000)
+    _member(node)
     ledger = tmp_path / "ledger"
     document = json.loads((_place(bundles, ledger / "full", "full") / "full-proofs.json").read_text())
     for name, broken, flaw in (
@@ -272,9 +295,9 @@ def test_a_malformed_proofs_file_is_left_out_with_one_line_not_a_traceback(bundl
 def test_a_node_that_is_not_past_the_periods_end_is_an_error(wallet, run, monkeypatch):
     """Finding 13: a past end beyond the node's last block closed the period on the tip, a year-end that is not one."""
     node = _node(wallet, tip=1012)
-    assert run(node, "-w", "watch", "history", "-o", "history.json")[0] == 0
+    _member(node)
     # every fake block lies in November 2023, the year's end is past, and the node has no block after it
-    code, _, err = run(node, "report", "--history", "history.json", "--year", "2023", "-o", "y")
+    code, _, err = run(node, "report", "--year", "2023", "-o", "y")
     assert code == 2 and "is before the period's end 2024-01-01T00:00:00Z" in err and "not settled" in err and not Path("y").exists()
     start, end = datetime.fromtimestamp(block_time(100), UTC), datetime.fromtimestamp(block_time(900), UTC)
     assert period_between(node, start, end).end.height == 899  # an end the node is well past resolves as before
@@ -293,9 +316,16 @@ def test_a_node_that_is_not_past_the_periods_end_is_an_error(wallet, run, monkey
 def test_a_period_to_the_tip_closes_on_the_historys_tip(wallet, run, monkeypatch):
     """Finding 13: a block arriving after the history was read made a to-tip period fail with "the history is older"."""
     node = _node(wallet, tip=1012)
-    assert run(node, "-w", "watch", "history", "-o", "history.json")[0] == 0
-    node.tip_height = 1015
-    code, _, err = run(node, "report", "--history", "history.json", "--from", "2023-11-14", "--to", "2099-01-01", "-o", "t")
+    _member(node)
+    read = cli_module.fetch_history
+
+    def read_then_a_block(cli, progress=None):  # the node gains a block between the read of the history and the period's resolution
+        history = read(cli, progress=progress)
+        node.tip_height = 1015
+        return history
+
+    monkeypatch.setattr(cli_module, "fetch_history", read_then_a_block)
+    code, _, err = run(node, "report", "--from", "2023-11-14", "--to", "2099-01-01", "-o", "t")
     assert code == 1 and "older than" not in err
     period = json.loads(_written("t", ".json").read_text())["period"]
     assert period["to_tip"] and period["end"]["height"] == 1012 and period["label"] == "2023-11-14..2099-01-01"
@@ -303,72 +333,81 @@ def test_a_period_to_the_tip_closes_on_the_historys_tip(wallet, run, monkeypatch
     assert period_between(node, start, datetime(2099, 1, 1, tzinfo=UTC)).end.height == 1015  # without a history: the node's tip
     # the clock set to the fake chain's present: the year is not over, so it runs to the tip too
     monkeypatch.setattr("bip322report.period._now", lambda: datetime.fromtimestamp(block_time(1012) + 60, UTC))
-    assert run(node, "report", "--history", "history.json", "--year", "2023", "-o", "y")[0] == 1
+    assert run(node, "report", "--year", "2023", "-o", "y")[0] == 1
     period = json.loads(_written("y", ".json").read_text())["period"]
-    assert period["to_tip"] and period["end"]["height"] == 1012 and period["label"] == "2023"
+    assert period["to_tip"] and period["end"]["height"] == 1015 and period["label"] == "2023"  # the node's tip when read
 
 
 def test_a_history_from_another_chain_or_a_reorged_tip_is_refused(wallet, run):
-    """Finding 19: --history was trusted against any node."""
-    node = _node(wallet, tip=1012)
-    assert run(node, "-w", "watch", "history", "-o", "history.json")[0] == 0
-    history = json.loads(Path("history.json").read_text())
+    """Finding 19: a history file was trusted against any node. A kept history serves a wallet the node has not loaded, if it
+    held nothing at its tip; balance takes any history file with --history."""
+    node = FakeNode(tip=1012)  # a wallet with no transactions: it held nothing, so its kept history may serve once it is unloaded
+    member = _member(node)
+    history = json.loads((member / "history.json").read_text())
+    unloaded = lambda: _Switch({}, chain=node)  # noqa: E731 - no wallet is loaded; the node itself answers the chain-level calls
     for name, change, message in (
-        ("testnet.json", {"chain": "test"}, "testnet.json is of the test chain; the node is on main"),
-        ("reorged.json", {"tip_hash": "ab" * 32}, "reorged.json: its tip block 1012 (" + "ab" * 32 + ") is not in the node's chain"),
-        ("ahead.json", {"tip_height": 1013, "tip_hash": "cd" * 32}, "ahead.json: its tip block 1013"),
+        ("testnet.json", {"chain": "test"}, "history.json is of the test chain; the node is on main"),
+        ("reorged.json", {"tip_hash": "ab" * 32}, "history.json: its tip block 1012 (" + "ab" * 32 + ") is not in the node's chain"),
+        ("ahead.json", {"tip_height": 1013, "tip_hash": "cd" * 32}, "history.json: its tip block 1013"),
     ):
+        (member / "history.json").write_text(json.dumps({**history, **change}))
+        code, out, err = run(unloaded, "report", "--from-height", "1000", "--to-height", "1012", "-o", "h")
+        assert code == 2 and message in err.splitlines()[-1] and len(err.splitlines()) == 2 and out == "" and not Path("h").exists()
         Path(name).write_text(json.dumps({**history, **change}))
-        code, out, err = run(node, "report", "--history", name, "--from-height", "1000", "--to-height", "1012", "-o", "h")
-        assert code == 2 and message in err and len(err.splitlines()) == 1 and out == "" and not Path("h").exists()
         assert run(node, "balance", "--history", name, "--at", "2023-11-21T10:00:00Z")[0] == 2
+    (member / "history.json").write_text(json.dumps(history))
+    Path("history.json").write_text(json.dumps(history))
     assert run(node, "balance", "--history", "history.json", "--at", "2023-11-21T10:00:00Z")[0] == 0
-    assert run(node, "report", "--history", "history.json", "--from-height", "1000", "--to-height", "1012", "-o", "h")[0] == 1
+    code, _, err = run(unloaded, "report", "--from-height", "1000", "--to-height", "1012", "-o", "h")
+    assert code == 0 and "watch: not loaded; from history.json saved " in err
 
 
 def test_the_statement_is_a_pdf_when_it_can_be_and_html_otherwise(bundles, wallet, run, monkeypatch):
     """Installing [pdf] says what is wanted: no flag. Without WeasyPrint the statement is one HTML file, said so; --html asks for that."""
     node = _node(wallet, tip=1000)
+    _member(node)
     code, _, err = run(node, "report", *HEIGHTS, "--snapshots", bundles / "full", "-o", "h")  # the fixture: no WeasyPrint
-    assert code == 0 and "no PDF (WeasyPrint is not installed or lacks Pango): the statement is watch-979..1000.html" in err
+    assert code == 0 and f"no PDF (WeasyPrint is not installed or lacks Pango): the statement is {STEM}.html" in err
     assert sorted(p.name for p in Path("h").iterdir()) == [
         "full-proofs.json",
-        "watch-979..1000-history.html",
-        "watch-979..1000.csv",
-        "watch-979..1000.html",
-        "watch-979..1000.json",
+        f"{STEM}-history.html",
+        f"{STEM}.csv",
+        f"{STEM}.html",
+        f"{STEM}.json",
     ]
-    assert 'src: url("data:font/woff2;base64,' in Path("h/watch-979..1000.html").read_text()  # one file: the fonts travel inside it
+    assert 'src: url("data:font/woff2;base64,' in Path(f"h/{STEM}.html").read_text()  # one file: the fonts travel inside it
     code, _, err = run(node, "report", *HEIGHTS, "--snapshots", bundles / "full", "--html", "-o", "asked")
-    assert code == 0 and "no PDF" not in err and Path("asked/watch-979..1000.html").exists()
+    assert code == 0 and "no PDF" not in err and Path(f"asked/{STEM}.html").exists()
     written: list = []
     monkeypatch.setattr(cli_module, "write_pdf", lambda html, path: written.append(path))
     code, _, err = run(node, "report", *HEIGHTS, "--snapshots", bundles / "full", "-o", "p", pdf=True)
-    both = [Path("p/watch-979..1000.pdf"), Path("p/watch-979..1000-history.pdf")]  # the statement, and the history for a reader
-    assert code == 0 and "no PDF" not in err and written == both and not Path("p/watch-979..1000.html").exists()
+    both = [Path(f"p/{STEM}.pdf"), Path(f"p/{STEM}-history.pdf")]  # the statement, and the history for a reader
+    assert code == 0 and "no PDF" not in err and written == both and not Path(f"p/{STEM}.html").exists()
     code, _, err = run(node, "report", *HEIGHTS, "--snapshots", bundles / "full", "--html", "-o", "p2", pdf=True)  # asked for, PDF or not
-    assert code == 0 and written == both and Path("p2/watch-979..1000.html").exists() and Path("p2/watch-979..1000-history.html").exists()
+    assert code == 0 and written == both and Path(f"p2/{STEM}.html").exists() and Path(f"p2/{STEM}-history.html").exists()
 
 
 def test_pdf_is_written_last(bundles, wallet, run, monkeypatch):
     """Finding 18: should the rendering itself fail, everything else is already in place and the result has been said."""
     node = _node(wallet, tip=1000)
+    _member(node)
 
     def fail(html, path):
-        assert (path.parent / "full-proofs.json").exists() and (path.parent / "watch-979..1000.csv").exists()
+        assert (path.parent / "full-proofs.json").exists() and (path.parent / f"{STEM}.csv").exists()
         assert 'src: url("file://' in html and "data:font" not in html  # the PDF reads the fonts as installed
-        assert path.name == "watch-979..1000.pdf" and not (path.parent / "fonts").exists()
+        assert path.name == f"{STEM}.pdf" and not (path.parent / "fonts").exists()
         raise RuntimeError("no Pango")
 
     monkeypatch.setattr(cli_module, "write_pdf", fail)
     code, out, err = run(node, "report", *HEIGHTS, "--snapshots", bundles / "full", "-o", "p", pdf=True)
-    assert code == 2 and "RESULT: OK" in err and err.splitlines()[-1] == "error: no Pango" and Path("p/watch-979..1000.json").exists()
-    assert not Path("p/watch-979..1000.html").exists()
+    assert code == 2 and "RESULT: OK" in err and err.splitlines()[-1] == "error: no Pango" and Path(f"p/{STEM}.json").exists()
+    assert not Path(f"p/{STEM}.html").exists()
 
 
 def test_explorer_links_by_default_on_mainnet_only(wallet, run, monkeypatch):
     """Finding 24: the mainnet explorer was linked on every chain."""
     node = _node(wallet, tip=1000)
+    _member(node)
     run(node, "report", *HEIGHTS, "-o", "main")
     assert 'href="https://mempool.space/tx/' in _written("main", ".html").read_text()
     run(node, "report", *HEIGHTS, "--explorer", "", "-o", "none")
@@ -388,7 +427,9 @@ def test_explorer_links_by_default_on_mainnet_only(wallet, run, monkeypatch):
 
 def test_notes_name_the_repository_not_an_unregistered_package(wallet, run):
     """Finding 20: the statement told readers to ``pip install`` a name not yet registered."""
-    run(_node(wallet, tip=1000), "report", *HEIGHTS, "-o", "n")
+    node = _node(wallet, tip=1000)
+    _member(node)
+    run(node, "report", *HEIGHTS, "-o", "n")
     html = _written("n", ".html").read_text()
     assert "https://github.com/embeddednation/bip322-report" in html and "pip install" not in html
 
@@ -409,9 +450,10 @@ def test_the_statement_is_the_default_command(wallet, run, capsys):
     assert with_default_command(["-w", "x"]) == ["-w", "x", "report"]
     assert with_default_command(["--dir", "d", "-y", "2026"]) == ["--dir", "d", "report", "-y", "2026"]
     assert with_default_command(["--dir=d"]) == ["--dir=d", "report"]
-    assert with_default_command(["company"]) == ["report", "company"]  # no such holder here: the parser will say so
+    assert with_default_command(["company"]) == ["report", "company"]  # a holder: the statement's argument
     assert with_default_command(["--dir", "no-such-dir", "company"]) == ["--dir", "no-such-dir", "report", "company"]
     node = _node(wallet, tip=1000)
+    _member(node)
     assert run(node, *HEIGHTS, "-o", "short")[0] == run(node, "report", *HEIGHTS, "-o", "long")[0] == 1  # no proofs: ATTENTION, both ways
     assert _written("short", ".json").exists() and _written("long", ".json").exists()
     assert run(node)[0] == 0 and "history" in run(node, "help")[1]  # nothing at all lists the commands
@@ -421,13 +463,15 @@ def test_wallet_and_dir_go_before_or_after_any_command(bundles, wallet, run, tmp
     """-w and --dir are taken on either side of every command, and --dir beats BIP322_DIR."""
     node = _node(wallet, tip=1000)
     elsewhere = tmp_path / "elsewhere"
-    _place(bundles, elsewhere / "h" / "watch" / "snapshots" / "full", "full")
-    code, out, err = run(node, "report", *HEIGHTS, "--dir", elsewhere, "-w", "watch")
-    assert code == 0 and "RESULT: OK" in err and out.strip() == str(elsewhere / "h" / "watch" / "statements" / "979..1000")
-    assert _written(out.strip(), ".json").name == "watch-979..1000.json"
+    _place(bundles, elsewhere / "h" / "watch" / "full", "full")  # a snapshot in the wallet's directory makes the wallet, and the holder
+    code, out, err = run(node, "report", *HEIGHTS, "--dir", elsewhere)
+    assert code == 0 and "RESULT: OK" in err and out.strip() == str(elsewhere / "h" / "statements" / "979..1000")
+    assert _written(out.strip(), ".json").name == f"{STEM}.json" and (elsewhere / "h" / "watch" / "history.json").is_file()
     assert [p.name for p in (tmp_path / "bip322").iterdir()] == ["bip322.toml"]  # nothing written to BIP322_DIR
-    code, _, err = run(node, "--dir", elsewhere, "report", *HEIGHTS, "-w", "watch")
+    code, _, err = run(node, "--dir", elsewhere, "report", *HEIGHTS)
     assert code == 2 and "exists and is not empty" in err  # the same place, found again
+    code, _, err = run(node, "--dir", elsewhere, "report", *HEIGHTS, "-w", "watch", "-o", "w")
+    assert code == 2 and "-w names a wallet for history and balance" in err and not Path("w").exists()
     for argv in (["block", "-w", "x", "2026-01-01"], ["history", "--dir", "d", "-w", "x"], ["report", "-y", "2026", "--dir", "d"]):
         cli_module.build_parser().parse_args(argv)  # accepted after the command
 
@@ -441,14 +485,16 @@ def test_the_sample_config_names_a_theme_and_a_heading_style_that_exist():
     assert set(data["wallets"]) == {"treasury", "personal"} and tomllib.loads(sample_config()) == {}
 
 
-def test_inside_a_wallets_directory_that_wallet_is_meant(bundles, wallet, run, tmp_path, monkeypatch):
-    """Run in books/ (not the node wallet's name), the statement is books'; no -w, no asking the node which wallet."""
+def test_inside_a_wallets_directory_its_holder_is_meant(bundles, wallet, run, tmp_path, monkeypatch):
+    """Run in h/books/ (not the node wallet's name), the statement is h's, over books; no holder named, no asking the node."""
     node = _node(wallet, tip=1000)
-    _place(bundles, tmp_path / "bip322" / "h" / "books" / "snapshots" / "full", "full")
+    _place(bundles, tmp_path / "bip322" / "h" / "books" / "full", "full")
+    (tmp_path / "bip322" / "bip322.toml").write_text("")  # no default holder either: the directory says
     monkeypatch.chdir(tmp_path / "bip322" / "h" / "books")
     code, out, err = run(node, "report", *HEIGHTS)
-    assert code == 0 and out.strip() == str(tmp_path / "bip322" / "h" / "books" / "statements" / "979..1000")
-    assert _written(out.strip(), ".json").name == "books-979..1000.json"
+    assert code == 0 and out.strip() == str(tmp_path / "bip322" / "h" / "statements" / "979..1000")
+    written = json.loads(_written(out.strip(), ".json").read_text())
+    assert _written(out.strip(), ".json").name == f"{STEM}.json" and [w["name"] for w in written["wallets"]] == ["books"]
 
 
 def test_the_addresses_table_names_the_other_side_in_the_csv(wallet, run, tmp_path):
@@ -461,31 +507,29 @@ def test_the_addresses_table_names_the_other_side_in_the_csv(wallet, run, tmp_pa
     node.add("aa" * 32, 990, [("ff" * 32, 0)], [(a0, 100_000)])
     node.add("bb" * 32, 995, [("aa" * 32, 0)], [(exchange, 30_000), (a1, 69_000)])
     data_dir = Path(os.environ["BIP322_DIR"])
-    data_dir.mkdir(parents=True, exist_ok=True)
+    _member(node)
     (data_dir / "bip322.toml").write_text(f'holder = "h"\n\n[addresses]\n"{exchange}" = "Exchange"\n')
-    code, out, err = run(node, "-w", "watch", "report", "--from-height", "980", "--to-height", "1000", "-o", "named")
+    code, out, err = run(node, "report", "--from-height", "980", "--to-height", "1000", "-o", "named")
     assert code == 1 and "ATTENTION" in err  # no proofs: the statement is written all the same
-    rows = list(csv.DictReader(_written("named", ".csv").open()))
+    rows = list(csv.DictReader(_written("named", ".csv").open()))  # one wallet: the rows alone, no block above them
     assert list(rows[0]) == ["time", "txid", "category", "amount", "balance", "wallet"]
     assert [(r["category"], r["amount"], r["balance"], r["wallet"]) for r in rows] == [
         ("receive", "0.00100000", "0.00100000", "Exchange"),
         ("send", "-0.00031000", "0.00069000", "Exchange"),
     ]
     (data_dir / "bip322.toml").write_text('holder = "h"\n\n[addresses]\n"bc1q" = 3\n')
-    code, out, err = run(node, "-w", "watch", "report", "--from-height", "980", "--to-height", "1000", "-o", "bad")
+    code, out, err = run(node, "report", "--from-height", "980", "--to-height", "1000", "-o", "bad")
     assert code == 2 and "[addresses] must map each address to the name of the wallet" in err and not Path("bad").exists()
 
 
-def test_the_statement_header_names_the_wallets_holder(wallet, run, tmp_path):
-    """The holder of a wallet is the directory it is under; [holders.KEY] name is the header, else the key; no holder, no header."""
+def test_the_statement_header_names_the_holder(wallet, run, tmp_path):
+    """The holder is the directory the wallets are under; [holders.KEY] name is the header, else the key."""
     node = _node(wallet, tip=1000)
     data_dir = Path(os.environ["BIP322_DIR"])
-    (data_dir / "h" / "watch" / "snapshots").mkdir(parents=True)
+    _member(node)
     (data_dir / "bip322.toml").write_text('[holders.h]\nname = "Company AB"\n')
-    run(node, "-w", "watch", "report", *HEIGHTS, "-o", "named")
-    assert json.loads(_written("named", ".json").read_text())["holder"] == "Company AB"
+    run(node, "report", *HEIGHTS, "-o", "named")
+    assert json.loads(_written("named", ".json").read_text())["label"] == "Company AB"
     (data_dir / "bip322.toml").write_text("")
-    run(node, "-w", "watch", "report", *HEIGHTS, "-o", "bare")
-    assert json.loads(_written("bare", ".json").read_text())["holder"] == "h"
-    run(node, "-w", "elsewhere", "report", *HEIGHTS, "-o", "none")
-    assert json.loads(_written("none", ".json").read_text())["holder"] is None  # not in the tree: nobody's
+    run(node, "report", *HEIGHTS, "-o", "bare")
+    assert json.loads(_written("bare", ".json").read_text())["label"] == "h"

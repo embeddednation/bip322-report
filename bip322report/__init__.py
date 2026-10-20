@@ -10,8 +10,8 @@ coin the proof of control that covers it, re-verified at report time.
 * ``history``  the wallet's transactions from the node, cached as JSON
 * ``block``    the last block before a UTC date or time
 * ``balance``  the coins and balance at a height or date
-* ``report``   the statement for a period: PDF (or HTML), JSON, CSV, into ``<holder>/<wallet>/statements/`` in the data directory; the default
-* ``holder``   the holder's ledger over the wallets under it, merged, into ``<holder>/statements/`` in the data directory
+* ``report``   the holder's statement over the wallets under it, for a period or to date: PDF (or HTML), JSON, CSV, into
+               ``<holder>/statements/`` in the data directory; the default
 """
 
 from ._version import __version__

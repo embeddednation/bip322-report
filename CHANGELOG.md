@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.30.0 (2026-10-20)
+
+The statement is the holder's. `bip322 report [HOLDER]` is what `bip322
+report holder [HOLDER]` was: one statement over every wallet under the
+holder's directory, for a period or to date, into
+`<holder>/statements/<label>/` as `<holder>-<label>.pdf`, `.json`, `.csv`,
+`-history.pdf` and the proofs files it cites. The per-wallet statement and
+the `holder` subcommand are gone, with `--history` on the statement; `-w`
+names a wallet for `history` and `balance` only, and the statement refuses
+it. A holder of one wallet gets the same document without the split by
+wallet (no share rows, no per-wallet headings, no group rows, no wallet on
+the UTXO pages) and a CSV of that wallet's rows alone. In a joint
+transaction a wallet on both sides is named once in the counterparty.
+
+The tree follows bip322-audit 0.22: a wallet's directory holds its snapshots
+and its `history.json`, nothing else (`<holder>/<wallet>/<date>-<height>/`),
+and the proofs come from there. A wallet laid out as before, with a
+`snapshots/`, is refused with the command that moves them up; old
+`<wallet>/statements/` directories are no longer read.
+
 ## 0.29.2 (2026-10-20)
 
 The sentence under the summary that says what is proven is set in the

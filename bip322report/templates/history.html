@@ -15,10 +15,11 @@
   </div>
 </div>
 <p class="period">{% if r.holder %}{{ r.holder }} · {% endif %}<span class="when">{{ r.period.start.time_utc | utc }}</span> – <span class="when">{{ r.period.end.time_utc | utc }}</span>{% if r.chain != "main" %} · {{ r.chain }} chain{% endif %}</p>
-<p>Holdings at the end of the period: <strong>{{ r.closing.total_btc }} BTC</strong>{% if r.wallets %}, in {{ r.wallets | length }} wallet{{ "s" if r.wallets | length != 1 }}: {% for w in r.wallets %}{{ w.name }} {{ w.closing_btc }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.</p>
+{% set many = r.wallets and r.wallets | length > 1 %}
+<p>Holdings at the end of the period: <strong>{{ r.closing.total_btc }} BTC</strong>{% if many %}, in {{ r.wallets | length }} wallets: {% for w in r.wallets %}{{ w.name }} {{ w.closing_btc }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.</p>
 
 {% for b in blocks %}
-<h2><span class="n">{{ loop.index }}.</span> {{ b.name }}</h2>
+{% if many %}<h2><span class="n">{{ loop.index }}.</span> {{ b.name }}</h2>{% endif %}
 {% if b.transactions %}
 <table>
   <colgroup><col class="w-date"><col><col class="w-num"><col class="w-num"><col class="w-num">{% if r.fiat %}<col class="w-num">{% endif %}</colgroup>
@@ -38,7 +39,7 @@
 
 <h3 class="notes">Notes</h3>
 <div class="small runin muted">
-  <p>Amounts in BTC to eight decimals, negatives in parentheses; an amount is what moved between the wallet and the counterparty, received or (sent), before the network fee, which has a column of its own{% if r.fiat %}; {{ r.fiat.currency }} from {{ r.fiat.source }} at the rate on each transaction's day{% endif %}. The balance is the wallet's after the transaction, the amount and the fee together.{% if r.wallets %} A move between two of the holder's wallets is sent by the one and received by the other for the same amount, the fee with the sender.{% endif %} The counterparty is the other wallet, as the holder names it, empty when not known; an internal move, a joint transaction and dust swept are named as such there.</p>
+  <p>Amounts in BTC to eight decimals, negatives in parentheses; an amount is what moved between the wallet and the counterparty, received or (sent), before the network fee, which has a column of its own{% if r.fiat %}; {{ r.fiat.currency }} from {{ r.fiat.source }} at the rate on each transaction's day{% endif %}. The balance is the wallet's after the transaction, the amount and the fee together.{% if many %} A move between two of the holder's wallets is sent by the one and received by the other for the same amount, the fee with the sender.{% endif %} The counterparty is the other wallet, as the holder names it, empty when not known; an internal move, a joint transaction and dust swept are named as such there.</p>
   <p>{{ r.chain }} chain; opening figures at block {{ r.period.start.height }}, closing at block {{ r.period.end.height }}. Prepared {{ r.generated_utc | utc }} by {{ r.tool }}; reference {{ r.report_id }}. The statement of holdings and movements under the same reference carries the transaction identifiers and the proofs of control.</p>
 </div>
 </body>

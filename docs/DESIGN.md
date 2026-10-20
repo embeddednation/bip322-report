@@ -101,13 +101,13 @@ of proofs is the wallet's snapshots: bip322-audit's directories on disk, each
 with its proofs file, self-contained and independently verifiable. There is
 nothing else to keep in sync.
 
-The tree is `<holder>/<wallet>/` under the directory `bip322 init` made, shared with bip322-audit: `snapshots/`
-is read, `statements/<label>/` is written; the holder's ledger over the
-wallets under it goes to `<holder>/statements/<label>/`, the grouping being
-the path itself, with `[holders.KEY]` in `bip322.toml` giving the holder's
-name and the defaults for its wallets. A directory is named for its
+The tree is `<holder>/<wallet>/` under the directory `bip322 init` made, shared with bip322-audit: the
+snapshots in the wallets' directories are read, `<holder>/statements/<label>/`
+is written, the statement being the holder's over the wallets under it, the
+grouping the path itself, with `[holders.KEY]` in `bip322.toml` giving the
+holder's name and the defaults for its wallets. A directory is named for its
 place and stays bare; a file that leaves the tree is named for its life,
-`<wallet>-<label>.pdf` and `<wallet>-<date>-<height>-proofs.json`, so the
+`<holder>-<label>.pdf` and `<wallet>-<date>-<height>-proofs.json`, so the
 statement's files and the proofs files it copies beside itself say what they
 are on any disk. The statement is one document, the PDF when WeasyPrint is
 there and otherwise an HTML file with the fonts embedded, plus the JSON (the

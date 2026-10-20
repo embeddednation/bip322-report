@@ -395,7 +395,7 @@ def render_html(
 
 
 def _pages(report: dict) -> list[dict]:
-    """The closing UTXOs as the statement lists and pages them, a holder's by wallet in the ledger's order: each with its number,
+    """The closing UTXOs as the statement lists and pages them, a holder's by wallet in the statement's order: each with its number,
     its address's script and proof (``closing.addresses``, where the proof is verified) and whether that proof predates it."""
     rank = {w["name"]: n for n, w in enumerate(report["wallets"] or [])}
     groups = {a["address"]: a for a in report["closing"]["addresses"]}
@@ -471,8 +471,8 @@ def _font_url(file: str, fonts_url: str | None) -> str:
 def write_csv(report: dict, path: Path) -> None:
     """The movements for a spreadsheet: time, txid, category, amount (the wallet's net, fee inside), balance (the running sum of
     the amounts) and wallet (the other side, as ``[addresses]`` in bip322.toml names it; empty to fill in by hand), then rate and
-    amount_fiat when rates were given.  A holder's ledger is one block per wallet, the wallet's name on a line of its own above
-    the header, the movements as that wallet sees them, a blank line between."""
+    amount_fiat when rates were given.  A holder of several wallets gets one block per wallet, the wallet's name on a line of its
+    own above the header, the movements as that wallet sees them, a blank line between; a holder of one wallet, that wallet's rows."""
     fiat = report.get("fiat")
     fields = ["time", "txid", "category", "amount", "balance", "wallet"] + (["rate", "amount_fiat"] if fiat else [])
 
@@ -482,11 +482,12 @@ def write_csv(report: dict, path: Path) -> None:
 
     with Path(path).open("w", newline="") as fh:
         w = csv.writer(fh)
-        if report.get("wallets") is None:
+        blocks = report.get("wallets")
+        if blocks is None or len(blocks) == 1:
             w.writerow(fields)
-            w.writerows(row(tx) for tx in report["transactions"])
+            w.writerows(row(tx) for tx in (report["transactions"] if blocks is None else blocks[0]["transactions"]))
             return
-        for n, block in enumerate(report["wallets"]):
+        for n, block in enumerate(blocks):
             if n:
                 w.writerow([])
             w.writerow([block["name"]])

@@ -24,7 +24,7 @@ PORT=$(.venv/bin/python -m bip322audit.testing port)
 CLI="$CORE/bin/bitcoin-cli -regtest -datadir=$DATADIR -rpcport=$PORT -rpcuser=demo -rpcpassword=demo"
 DEV=.venv/bin/bip322-dev; AUDIT=.venv/bin/bip322-audit; REPORT=.venv/bin/bip322-report
 export BIP322_DIR="$WORK/bip322"   # the data directory for this run (in real life: cd into it and bip322 init)
-SNAPSHOTS="$BIP322_DIR/demo/watch/snapshots"; STATEMENTS="$BIP322_DIR/demo/watch/statements"
+WALLET="$BIP322_DIR/demo/watch"; STATEMENTS="$BIP322_DIR/demo/statements"
 step() { printf '\n\033[1m=== %s ===\033[0m\n' "$*"; }
 run() { printf '$ %s\n' "$*" >&2; "$@"; }
 cleanup() { $CLI stop >/dev/null 2>&1 || true; sleep 1; rm -rf "$DATADIR"; }
@@ -63,7 +63,7 @@ A0=$(.venv/bin/bip322 -w "$WORK/wallet.desc" --network regtest deriveaddresses 0
 $CLI -rpcwallet=miner sendtoaddress "$A0" 0.5 >/dev/null; $CLI -rpcwallet=miner sendtoaddress "$A1" 0.1 >/dev/null
 $CLI -rpcwallet=miner generatetoaddress 2 "$MINE" >/dev/null
 
-step "3. the owner proves everything once (the first snapshot under $SNAPSHOTS)"
+step "3. the owner proves everything once (the first snapshot in $WALLET)"
 $AUDIT init -w demo/watch          # bip322.toml in $BIP322_DIR: holder = "demo", wallet = "watch"; the tree is demo/watch/
 sign_snapshot "$(run $AUDIT --cli "$CLI" -w watch snapshot --depth 1 --text "Proof of control {date}")"
 
@@ -92,23 +92,23 @@ $AUDIT --cli "$CLI" -w watch snapshot --depth 1 --skip-proven 2>&1 | tail -1 || 
 
 step "6. year end: one full snapshot over every output, so each closing coin has a proof dated at (or after) the closing block"
 sign_snapshot "$(run $AUDIT --cli "$CLI" -w watch snapshot --depth 1 --text "Proof of control {date}")"
-ls "$SNAPSHOTS"
+ls "$WALLET"
 
-step "7. the year's statement: opening and closing balances, movements, every closing coin backed by a verified proof (the PDF when WeasyPrint is installed)"
-run $REPORT --cli "$CLI" -w watch --year "$(date -u +%Y)"
+step "7. the year's statement of the holder, demo, over its one wallet: opening and closing balances, movements, every closing coin backed by a verified proof (the PDF when WeasyPrint is installed)"
+run $REPORT --cli "$CLI" --year "$(date -u +%Y)"
 ls "$STATEMENTS/$(date -u +%Y)"
 
-step "8. the same, from a cached history and for two heights, into a directory of one's own"
+step "8. the same for two heights, with a fiat valuation, into a directory of one's own; and the wallet's history as JSON"
+run $REPORT --cli "$CLI" --from-height 103 --to-height 105 --rate 950000 --currency SEK -o "$WORK/report-q"
 run $REPORT --cli "$CLI" -w watch history -o "$WORK/history.json"
-run $REPORT --cli "$CLI" -w watch --history "$WORK/history.json" --from-height 103 --to-height 105 --rate 950000 --currency SEK -o "$WORK/report-q"
 
 step "9. unsolicited dust arrives: 600 satoshi from someone else, to an address of the wallet"
 DUST=$(.venv/bin/bip322 -w "$WORK/wallet.desc" --network regtest deriveaddresses 7)
 $CLI -rpcwallet=miner sendtoaddress "$DUST" 0.00000600 >/dev/null; $CLI -rpcwallet=miner generatetoaddress 1 "$MINE" >/dev/null
 echo "as it stands the statement holds a UTXO without a proof: RESULT: ATTENTION, exit status 1"
-STATUS=0; run $REPORT --cli "$CLI" -w watch --year "$(date -u +%Y)" -o "$WORK/report-unproven-dust" || STATUS=$?
+STATUS=0; run $REPORT --cli "$CLI" --year "$(date -u +%Y)" -o "$WORK/report-unproven-dust" || STATUS=$?
 [ "$STATUS" -eq 1 ] || { echo "expected exit status 1 (ATTENTION), got $STATUS" >&2; exit 1; }
 echo "with --dust 1000 it is left out of every figure, counted in a note and listed in the JSON: RESULT: OK"
-run $REPORT --cli "$CLI" -w watch --year "$(date -u +%Y)" --dust 1000 -o "$WORK/report-dust"
+run $REPORT --cli "$CLI" --year "$(date -u +%Y)" --dust 1000 -o "$WORK/report-dust"
 
 step "done - artifacts in $WORK (the statements under $STATEMENTS)"

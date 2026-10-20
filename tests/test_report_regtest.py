@@ -155,27 +155,20 @@ def test_reports_workflow_on_regtest(core, regtest_wallet, signer_expressions, p
     import bip322report.cli as cli_module
 
     cli_arg = " ".join(core.cli_argv())
-    out = tmp_path / "report"
-    assert (
-        cli_module.main(
-            ["--cli", cli_arg, "-w", "watch", "report", "--year", str(YEAR), "--snapshots", str(ledger), "--html", "-o", str(out)]
-        )
-        == 0
-    )
-    written = json.loads((out / f"watch-{YEAR}.json").read_text())
-    assert written["ok"] and written["label"] == "watch" and (out / f"watch-{YEAR}.html").exists() and (out / f"watch-{YEAR}.csv").exists()
-    assert [t["counterpart"] for t in written["transactions"]] == ["", "", ""]  # nothing named the miner yet
     data_dir = Path(os.environ["BIP322_DIR"])
-    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "h" / "watch").mkdir(
+        parents=True
+    )  # the wallet, under the fixture's holder h: its history kept there makes it one of the tree
+    (data_dir / "h" / "watch" / "history.json").write_text(json.dumps(history.to_dict()))
+    out = tmp_path / "report"
+    assert cli_module.main(["--cli", cli_arg, "report", "--year", str(YEAR), "--snapshots", str(ledger), "--html", "-o", str(out)]) == 0
+    written = json.loads((out / f"h-{YEAR}.json").read_text())
+    assert written["ok"] and written["label"] == "h" and (out / f"h-{YEAR}.html").exists() and (out / f"h-{YEAR}.csv").exists()
+    assert [t["counterpart"] for t in written["transactions"]] == ["", "", ""]  # nothing named the miner yet
     miners = {a for tx in history.txs for a in tx.payers} | {mine_to}
     (data_dir / "bip322.toml").write_text("[addresses]\n" + "".join(f'"{a}" = "miner"\n' for a in sorted(miners)))
     named = tmp_path / "named"
-    assert (
-        cli_module.main(
-            ["--cli", cli_arg, "-w", "watch", "report", "--year", str(YEAR), "--snapshots", str(ledger), "--html", "-o", str(named)]
-        )
-        == 0
-    )
-    rows = list(csv.DictReader((named / f"watch-{YEAR}.csv").open()))
+    assert cli_module.main(["--cli", cli_arg, "report", "--year", str(YEAR), "--snapshots", str(ledger), "--html", "-o", str(named)]) == 0
+    rows = list(csv.DictReader((named / f"h-{YEAR}.csv").open()))
     assert [(r["category"], r["wallet"]) for r in rows] == [("receive", "miner"), ("receive", "miner"), ("send", "miner")]
     assert rows[-1]["balance"] == written["closing"]["total_btc"]
