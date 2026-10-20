@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.29.2 (2026-10-20)
+
+The sentence under the summary that says what is proven is set in the
+notes' size.
+
 ## 0.29.1 (2026-10-20)
 
 One type scale throughout: every table in 8pt with 7.5pt heads, every
