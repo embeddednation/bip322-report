@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.29.1 (2026-10-20)
+
+One type scale throughout: every table in 8pt with 7.5pt heads, every
+monospace value (ids, addresses, scripts, proofs, commands and their
+output) in 7pt, the labels of a UTXO's page in 7.5pt. The movements start
+on a page of their own, after the summary.
+
 ## 0.29.0 (2026-10-20)
 
 The date leads a movement's row, and the transaction id follows it whole,

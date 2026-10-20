@@ -88,7 +88,7 @@
 </table>
 {% endif %}
 
-<h2><span class="n">1.</span> Movements in the period</h2>
+<h2 class="page"><span class="n">1.</span> Movements in the period</h2>
 {% for b in blocks %}
 <div class="keep">
 {% if r.wallets %}<h3>1.{{ loop.index }} {{ b.name }}</h3>{% endif %}
@@ -150,8 +150,8 @@
 <table class="coins">
   <colgroup><col style="width:14%"><col></colgroup>
   <tbody>
-  <tr class="lead"><td class="k">address</td><td class="addr">{{ addr(a.address) }}</td></tr>
-  <tr><td class="k">scriptPubKey</td><td class="addr">{{ spk(a.script.script_pubkey, o.txid, "hl-script") }}</td></tr>
+  <tr class="lead"><td class="k">address</td><td>{{ addr(a.address) }}</td></tr>
+  <tr><td class="k">scriptPubKey</td><td>{{ spk(a.script.script_pubkey, o.txid, "hl-script") }}</td></tr>
   {% if a.proof %}
   {% set stamp = a.proof.stamp.height ~ " " ~ a.proof.stamp.hash %}
   <tr><td class="k">message</td><td><code class="msg">{{ a.proof.message | hl([["block", stamp, "block: "]]) }}</code></td></tr>

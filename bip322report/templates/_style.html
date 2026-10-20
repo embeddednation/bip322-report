@@ -33,7 +33,7 @@
   a { color: inherit; text-decoration: none; }
   .muted { color: var(--muted); }
   .small { font-size: 8pt; }
-  .mono, code { font-family: var(--font-mono); font-size: 7.5pt; overflow-wrap: anywhere; word-break: break-all; }
+  .mono, code { font-family: var(--font-mono); font-size: 7pt; overflow-wrap: anywhere; word-break: break-all; }
   .ok { color: var(--ok); font-weight: 700; } .bad { color: var(--bad); font-weight: 700; }
   .runin p { margin: 0 0 6px; }
 
@@ -67,9 +67,9 @@
   .period .when { color: var(--strong); font-weight: 600; font-variant-numeric: tabular-nums; }
 
   /* tables */
-  table { border-collapse: collapse; width: 100%; margin: 4px 0 10px; font-size: 8.8pt; table-layout: fixed; }
+  table { border-collapse: collapse; width: 100%; margin: 4px 0 10px; font-size: 8pt; table-layout: fixed; }
   th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--rule); vertical-align: top; overflow-wrap: anywhere; }
-  th { background: var(--head); color: var(--strong); font-weight: 600; font-size: 8pt; letter-spacing: 0.03em; border-bottom: 1.5px solid var(--rule-strong); }
+  th { background: var(--head); color: var(--strong); font-weight: 600; font-size: 7.5pt; letter-spacing: 0.03em; border-bottom: 1.5px solid var(--rule-strong); }
   tbody tr:nth-child(even) td { background: var(--zebra); }
   tr { break-inside: avoid; }
   tr.open td { font-weight: 700; color: var(--strong); }
@@ -91,11 +91,8 @@
   table.summary tbody tr:last-child td { border-bottom: 3px double var(--rule-strong); }
   p.proven { font-family: var(--font-label); margin: 10px 0 16px; }
 
-  /* the tables that name transactions and UTXOs: set smaller, the id in a column of its own, smaller still and wrapped only
-     between its eight-character groups */
-  table.ids { font-size: 8pt; }
-  table.ids th { font-size: 7.5pt; }
-  td.id .mono { font-size: 7pt; overflow-wrap: normal; word-break: normal; }
+  /* a transaction's or a UTXO's id in a column of its own: wrapped only between its eight-character groups */
+  td.id .mono { overflow-wrap: normal; word-break: normal; }
   tr.group td { background: var(--bg) !important; font-weight: 600; color: var(--strong); padding-top: 8px; border-bottom: 1px solid var(--rule-strong); }
 
   /* a UTXO's page: tables of a name and its value, without stripes */
@@ -104,15 +101,13 @@
   table.coins tbody tr.last td { border-bottom: 1px solid var(--rule); }
   table.coins tr.lead td { padding-top: 10px; border-top: 1px solid var(--rule); }
   table.coins tbody:first-of-type tr.lead td { border-top: 0; }
-  table.coins td.addr { font-size: 9pt; } table.coins td.addr .mono { font-size: 8.5pt; }
-  .page table.coins td.addr, .page table.coins td.addr .mono { font-size: 7.5pt; }
-  table.coins td.k { color: var(--muted); font-size: 8pt; padding-top: 6px; overflow-wrap: normal; }
+  table.coins td.k { color: var(--muted); font-size: 7.5pt; padding-top: 6px; overflow-wrap: normal; }
   code.msg, .sig { white-space: pre-wrap; display: block; line-height: 1.35; }
-  .badge { display: inline-block; padding: 0 6px; border-radius: 3px; font-size: 7.5pt; font-weight: 600; border: 1px solid; line-height: 1.5; background: var(--bg); }
+  .badge { display: inline-block; padding: 0 6px; border-radius: 3px; font-size: 7pt; font-weight: 600; border: 1px solid; line-height: 1.5; background: var(--bg); }
   .badge.bad { color: var(--bad); border-color: var(--bad); }
 
   /* commands and their output, and the values a reader matches in them: one thing, one colour */
-  pre { margin: 0; font-family: var(--font-mono); font-size: 7.5pt; line-height: 1.35; white-space: pre; overflow-x: hidden; }
+  pre { margin: 0; font-family: var(--font-mono); font-size: 7pt; line-height: 1.35; white-space: pre; overflow-x: hidden; }
   pre.out { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
   .term { color: var(--term-ink); padding: 3px 0 2px; margin: 0 0 2px; }
   .hl-script { color: var(--c-script); } .hl-utxo { color: var(--c-utxo); } .hl-block { color: var(--c-block); }
