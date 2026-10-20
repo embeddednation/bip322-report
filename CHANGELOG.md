@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.27.1 (2026-10-20)
+
+The movements and the holdings are set in 8pt, their ids in 7pt as before,
+and the counterparty column is wider: a wallet name of forty characters
+takes two lines of the row instead of three cramped ones.
+
 ## 0.27.0 (2026-10-20)
 
 One category per column. A movement's transaction id has a column of its

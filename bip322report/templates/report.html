@@ -93,8 +93,8 @@
 <div class="keep">
 {% if r.wallets %}<h3>1.{{ loop.index }} {{ b.name }}</h3>{% endif %}
 {% if b.transactions %}
-<table>
-  <colgroup><col style="width:23%"><col style="width:11%"><col style="width:10%"><col><col style="width:12%"><col style="width:12%"><col style="width:12%"></colgroup>
+<table class="ids">
+  <colgroup><col style="width:22%"><col style="width:10%"><col style="width:9%"><col><col style="width:11%"><col style="width:11%"><col style="width:11%"></colgroup>
   <thead><tr><th>Txid</th><th>Date (UTC)</th><th>Kind</th><th>Counterparty</th><th class="num">Amount{% if r.fiat %}<br><span class="muted">{{ r.fiat.currency }}</span>{% endif %}</th><th class="num">Fee</th><th class="num">Balance</th></tr></thead>
   <tbody>
   <tr class="open"><td colspan="6">Opening balance, {{ r.period.start.time_utc | utc }}</td><td class="num">{{ b.opening_btc }}</td></tr>
@@ -116,7 +116,7 @@
 <div class="page">
 <h2><span class="n">2.</span> Holdings at the end of the period · {{ r.period.end.time_utc | utc }}</h2>
 {% if pages %}
-<table>
+<table class="ids">
   <colgroup><col style="width:32%"><col style="width:11%"><col class="w-btc"><col><col style="width:8%"></colgroup>
   <thead><tr><th>UTXO</th><th>Received</th><th class="num">Amount</th><th>Proof of control</th><th class="num">Section</th></tr></thead>
   <tbody>
