@@ -16,7 +16,7 @@ A statement answers, for a holder and a period:
 Two ways of working with it, the same tool for both:
 
 * **Continuously, for yourself.** Before broadcasting a spend, prove its change address (`bip322 audit prove ADDRESS`, sign, finalize): a valid proof means the quorum controls where the change goes. New deposit addresses the same way, or with `snapshot --skip-proven` after the fact. A report can then be produced at any time, with every coin backed by your own signed message; a coin that arrived after its proof is marked as such (the proof shows control, not the holding).
-* **On demand, for an auditor.** After the period's end, take one full snapshot (no `--skip-proven`) over every output under a message that names the audit, and produce the report for the year. Every closing coin then has a proof dated after the closing block, and the chain lookup at that block shows the coin held. The auditor verifies the proofs files and the report on their own node with `bip322 audit verify` and `bitcoin-cli`.
+* **On demand, for an auditor.** Once the period is over, take one full snapshot (no `--skip-proven`) at its closing block (`--before 2027-01-01`: the last block of 2026) under a message that names the audit, and produce the report for the year. Every closing coin then has a proof dated at the closing block, and the chain lookup at that block shows the coin held. The auditor verifies the proofs files and the report on their own node with `bip322 audit verify` and `bitcoin-cli`.
 
 The whole flow, for the holder and for the auditor, is in the [handbook](bip322report/handbook.md); `bip322 report handbook` prints it.
 
@@ -79,7 +79,7 @@ bip322 report --year 2026             # or: bip322 report company --year 2026
 
 # the same from the first reception to now, for a source-of-funds question
 bip322 report company
-#   -> company/statements/2026-10-15/, labelled by the tip's date
+#   -> company/statements/2026-10-20/: closes on the last block before today 00:00 UTC, labelled by its date
 ```
 
 The holder is the word after the options, else the holder whose directory the
@@ -116,8 +116,8 @@ year, made in January from the year-end snapshot:
 treasury: 2026  blocks 878000 -> 931234  ref 009ab805de61d672
 opening 1.23400000 BTC  closing 1.03398110 BTC  net -0.20001890 BTC  (3 transactions, fees 0.00001890 BTC)
 reconciliation: ok
-proof coverage: 2/2 closing outputs, 1.03398110 BTC; stamped after the period's end: 2/2
-  proofs treasury-2027-01-08-931871-proofs.json: stamp 931871, signatures 2/2, verified, used for 2
+proof coverage: 2/2 closing outputs, 1.03398110 BTC, proven at or after the closing block 931871
+  proofs treasury-2026-12-31-931871-proofs.json: stamp 931871, signatures 2/2, verified, used for 2
   other proofs files, not used: 2
 on chain (holdings by UTXO at the block of its proof): 2/2 held when proven
 RESULT: OK
@@ -125,14 +125,15 @@ RESULT: OK
 
 `ref` identifies the facts stated (heights, coins, movements, the proofs
 chosen): the same facts give the same reference whenever the report is made.
-A period whose end is still in the future says `(to tip)`; when the period
-ends at the tip the history was read at, a line
-`node check (listunspent vs closing coins): ok` follows.
+A period whose end lies ahead says `(to date)`: it closes on the last block
+before today 00:00 UTC. When nothing of the wallet's moved after the closing
+block, a line `node check (listunspent vs closing coins): ok` follows.
 
 `RESULT: ATTENTION` means the reconciliation failed, a closing UTXO has no
-verified proof, a lookup on the chain contradicts the statement, or the node
-wallet disagrees with the closing UTXOs; the summary and the report say
-which. An uncovered UTXO is fixed by a new snapshot with `--skip-proven`.
+valid proof at or after the closing block, a lookup on the chain contradicts
+the statement, or the node wallet disagrees with the closing UTXOs; the
+summary and the report say which, and for the proofs the summary names the
+snapshot to take (`to prove: bip322 audit snapshot -w treasury --at 931871`).
 `report` exits 0 when the result is OK, 1 when it is ATTENTION and 2 on an
 error.
 
@@ -157,11 +158,14 @@ The statement is the default command (`report` names it explicitly, as in `help 
   A history of another chain, or one whose tip block is not in the node's
   chain (a reorganisation, another network), is refused.
 * `block` resolves a UTC date or instant to the last block before it, the
-  rule every period uses. `--year 2026` opens on the last block before
-  2026-01-01 and closes on the last block before 2027-01-01, or on the tip when
-  that is still in the future (the tip the history was read at). The heights
-  used are printed in the report, and `--from-height/--to-height` reproduce a
-  report exactly. The period is given one way only. When the end is in the
+  rule every period uses, and the rule `bip322 audit snapshot --before` uses.
+  `--year 2026` opens on the last block before 2026-01-01 and closes on the
+  last block before 2027-01-01, or, while that lies ahead, on the last block
+  before today 00:00 UTC (to date; no higher than the tip the history was
+  read at). Without a period the statement runs to date from the block
+  before the first transaction. The heights used are printed in the report,
+  and `--from-height/--to-height` reproduce a report exactly, or close it on
+  the tip itself. The period is given one way only. When the end is in the
   past and the node has no block after it yet (still syncing, or behind), the
   closing block is not settled and `report` refuses.
 * The proofs come from the wallets' directories under the holder's. `--snapshots DIR` takes
@@ -236,12 +240,13 @@ without the split.
   and in the HTML when that is the statement, so it looks the same on every
   machine and is one file. The commands' output is the finding;
   a badge follows only when something needs saying (INVALID, NO PROOF,
-  CONTRADICTED, a proof that predates its UTXO). BIP-322 defines
+  CONTRADICTED, a proof dated before the closing block, a proof that
+  predates its UTXO). BIP-322 defines
   the proof for a scriptPubKey ("the key script to be proven"); an address
   is that script encoded, which is why the statement can verify on the
   bytes themselves. A coin that arrived after its proof (a change address
   proven before the spend) is marked so; the year-end snapshot gives it a
-  proof dated after it.
+  proof at the closing block.
 * `--dust SATS`: an output of at most SATS satoshi is dust when others
   paid it to the wallet in a transaction that spends nothing of the
   wallet's. Dust is left out of every figure, as if it had never been the
@@ -260,21 +265,24 @@ without the split.
   and one above 10000 satoshi needs `--dust-force`.
 * Exceptions only: nothing in the statement says OK beyond the figures.
   Four checks decide the result: opening + net = closing; every closing
-  UTXO has a verified proof; no lookup on the chain contradicts the
-  statement (another scriptPubKey or amount); and, when the period ends
-  at the tip the history was read at, the node wallet's `listunspent`
-  agrees with the closing UTXOs. When one fails, an ATTENTION mark and a
-  checklist with the failing item appear on the first page. Shown on the
-  UTXO's page but not failed checks: a proof whose block is before the
-  period's end (the page names the proof's block), a UTXO received after
-  its proof, and a UTXO spent after the period (SPENT SINCE, with the
-  spending transaction; `spent_by` in the JSON). A lookup or a node check
-  that could not run is shown as not run, with the reason.
-* The node cross-check counts only while the node's tip is the history's,
-  before and after `listunspent`; otherwise it is not run. An output that
-  an unconfirmed transaction spends, or a coinbase output not yet mature,
-  is missing from `listunspent` but still in the chain (`gettxout`): it is
-  noted, not a mismatch.
+  UTXO has a verified proof dated at or after the closing block; no lookup
+  on the chain contradicts the statement (another scriptPubKey or amount);
+  and, when nothing of the wallet's moved after the closing block, the
+  node wallet's `listunspent` agrees with the closing UTXOs. When one
+  fails, an ATTENTION mark and a checklist with the failing item appear on
+  the first page. A proof dated before the closing block shows control at
+  that block, not at the period's end: the UTXO counts as unproven, its
+  page says so (BEFORE THE CLOSING BLOCK), and the summary names the
+  snapshot to take. Shown on the UTXO's page but not failed checks: a UTXO
+  received after its proof, and a UTXO spent after the period (SPENT
+  SINCE, with the spending transaction; `spent_by` in the JSON). A lookup
+  or a node check that could not run is shown as not run, with the reason.
+* The node cross-check counts only while the closing UTXOs are the present
+  ones: nothing of the wallet's moved after the closing block, and the
+  node's tip is the history's before and after `listunspent`; otherwise it
+  is not run. An output that an unconfirmed transaction spends, or a
+  coinbase output not yet mature, is missing from `listunspent` but still
+  in the chain (`gettxout`): it is noted, not a mismatch.
 * At the end, on a page of its own, section 4: how a BIP-322 proof of
   control works, for any kind of scriptPubKey, with a figure of the two
   virtual transactions field by field: the message hashed into to_spend's

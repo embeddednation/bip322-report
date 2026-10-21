@@ -72,11 +72,8 @@
   <colgroup><col><col style="width:56%"><col></colgroup>
   <tr><td>{{ yesno(r.reconciliation.ok) }}</td><td>Opening holdings and the movements add up to the closing holdings (section 1)</td>
       <td class="num">{% if r.reconciliation.ok %}difference {{ r.reconciliation.diff_sat | btc }}{% else %}difference {{ r.reconciliation.diff_sat | btc | acct }}{% endif %}</td></tr>
-  <tr><td>{{ yesno(r.coverage.complete) }}</td><td>Proof of control for every closing UTXO (sections 2 and 3)</td>
-      <td class="num">{{ r.coverage.covered_count }} of {{ r.coverage.total_count }} UTXOs{% if not r.coverage.complete %} · {{ r.coverage.uncovered_btc }} without proof{% endif %}</td></tr>
-  <tr><td>{% if r.period.to_tip or r.coverage.covered_after_period_count != r.coverage.total_count %}<span class="muted">–</span>{% else %}{{ yesno(true) }}{% endif %}</td>
-      <td>Proofs dated after the period's end</td>
-      <td class="num">{% if r.period.to_tip %}n/a, the period runs to the tip{% else %}{{ r.coverage.covered_after_period_count }} of {{ r.coverage.total_count }} UTXOs{% endif %}</td></tr>
+  <tr><td>{{ yesno(r.coverage.complete) }}</td><td>Proof of control at or after the closing block, for every closing UTXO (sections 2 and 3)</td>
+      <td class="num">{{ r.coverage.covered_count }} of {{ r.coverage.total_count }} UTXOs{% if r.coverage.before_count %} · {{ r.coverage.before_count }} proven before it{% endif %}{% if r.coverage.missing_count %} · {{ r.coverage.missing_count }} without proof{% endif %}</td></tr>
   {% if r.onchain %}
   <tr><td>{% if r.onchain.contradicted %}{{ yesno(false) }}{% elif r.onchain.not_run or r.onchain.spent_since or r.onchain.after_proof %}<span class="muted">–</span>{% else %}{{ yesno(true) }}{% endif %}</td>
       <td>Closing UTXOs found on the chain at the block of their proof (section 3)</td>
@@ -124,7 +121,7 @@
   {% for p in pages %}{% set o = p.o %}{% set a = p.a %}
   {% if many and (loop.first or o.wallet != loop.previtem.o.wallet) %}<tr class="group"><td colspan="4">{{ o.wallet }}</td></tr>{% endif %}
   <tr><td class="id">{{ utxo(o) }}</td><td class="num">{{ o.amount_btc }}</td>
-      <td>{% if not a.proof %}<span class="bad">NO PROOF</span>{% elif a.proof.verified %}<span class="ok">valid</span> · block {{ a.proof.stamp.height }}{% if p.before %} · before the UTXO{% endif %}{% else %}<span class="bad">{{ a.proof.state | upper }}</span> · block {{ a.proof.stamp.height }}{% endif %}</td>
+      <td>{% if not a.proof %}<span class="bad">NO PROOF</span>{% elif a.proof.verified %}<span class="ok">valid</span> · block {{ a.proof.stamp.height }}{% if p.timing == "at" %}, the closing block{% elif p.timing == "before" %}, <span class="bad">before the closing block</span>{% endif %}{% else %}<span class="bad">{{ a.proof.state | upper }}</span> · block {{ a.proof.stamp.height }}{% endif %}</td>
       <td class="num">3.{{ p.n }}</td></tr>
   {% endfor %}
   <tr class="total"><td>Closing holdings</td><td class="num">{{ r.closing.total_btc }}</td><td colspan="2">{{ pages | length }} UTXO{{ "s" if pages | length != 1 }}</td></tr>
@@ -133,7 +130,7 @@
 <p class="small muted">One page per UTXO follows: the proof of control of its scriptPubKey, then the chain's record of the UTXO at the block of the proof.</p>
 {% elif r.dust.count %}<p class="small muted">Nothing but dust at the end of the period (see the notes): nothing to prove.</p>{% else %}<p class="small muted">No holdings at the end of the period: nothing to prove.</p>{% endif %}
 {% if r.coverage.uncovered %}
-<p class="bad">UTXOs without a verified proof hold {{ r.coverage.uncovered_btc }}.</p>
+<p class="bad">UTXOs without a valid proof at or after the closing block hold {{ r.coverage.uncovered_btc }}{% if r.coverage.before_count %}: {{ r.coverage.before_count }} proven before it{% if r.coverage.missing_count %}, {{ r.coverage.missing_count }} without proof{% endif %}{% endif %}.</p>
 {% endif %}
 {% if r.pending_snapshots %}
 <p class="small muted">Proofs awaiting signatures: {% for p in r.pending_snapshots %}<code>{{ p }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.</p>
@@ -161,6 +158,7 @@
     <div class="term"><pre class="cmd">{{ a.proof.command | hl([["script", a.script.script_pubkey], ["proof", a.proof.signature], ["block", stamp, "block: "]]) }}</pre>
     <pre class="out">{{ a.proof.output | hl([["bad", "INVALID"], ["bad", "INCONCLUSIVE"], ["ok", "VALID"]]) }}</pre></div>
     {% if not a.proof.verified %}<span class="badge bad">{{ a.proof.state | upper }}</span> <span class="small muted">the proof does not verify; see the output above</span>{% endif %}
+    {% if p.timing == "before" and a.proof.verified %}<span class="badge bad">BEFORE THE CLOSING BLOCK</span> <span class="small muted">dated block {{ a.proof.stamp.height }}, before the closing block {{ r.period.end.height }}: it shows control at that earlier block, not at the end of the period.</span>{% endif %}
     {% if p.before %}<span class="small muted">The proof predates this UTXO: it shows control of the script, and the lookup below says when the UTXO arrived.</span>{% endif %}
   </td></tr>
   {% else %}
@@ -327,7 +325,7 @@
 <h3 class="notes">Notes</h3>
 <div class="small runin muted">
   <p>Amounts in BTC to eight decimals, negatives in parentheses{% if r.fiat %}; {{ r.fiat.currency }} from {{ r.fiat.source }}, each movement at the rate on its day, the opening and closing holdings at the rate on theirs{% endif %}. Amount is what moved between the {{ who }} and others, received or (sent), before the fee; the balance moves by the amount and the fee together. An internal move, a joint transaction and dust swept are named as such in the counterparty column.{% if r.totals.mixed_count %} A joint transaction has inputs from others beside the {{ who }}'s: its fee is unknown and its amount is the {{ who }}'s net.{% endif %}{% if r.dust.count %} Outputs of at most {{ r.dust.threshold_sat }} sat received from others are dust and left out of every figure, as if they had never been the {{ who }}'s: at the closing block the {{ who }}'s addresses hold {{ r.dust.count }}, {{ r.dust.total_btc }} in all ({{ r.name | default("report") }}.json lists them). Spending them would cost more in fees than they hold, so they are left where they are; what is proven is control, not its absence.{% endif %}{% if r.dust.swept_count %} Dust the {{ who }} spent in the period ({{ r.dust.swept_count }}, {{ r.dust.swept_btc }} in all) is booked in the block that spent it, as a movement of its own named after the output.{% endif %}</p>
-  <p>{% if many %}Holder {{ r.label }}, {{ r.wallets | length }} wallets ({% for w in r.wallets %}{{ w.name }}{% if not loop.last %}, {% endif %}{% endfor %}); a move between them is sent by the one and received by the other, in neither the received nor the sent of the summary, its fee the holder's only cost{% elif r.wallets %}Holder {{ r.label }}, wallet {{ r.wallets[0].name }}{% if r.wallets[0].history and r.wallets[0].history.source == "file" %}, history kept {{ r.wallets[0].history.fetched_utc[:10] }} (the wallet was not loaded on the node){% endif %}{% else %}Wallet {{ r.label }}{% endif %}{% if r.policy == "1 of 1" %}, single key{% elif r.policy %}, {{ r.policy }} keys{% endif %}, {{ r.chain }} chain; opening figures at block {{ r.period.start.height }}, closing at block {{ r.period.end.height }}{% if r.period.to_tip %}, the tip when prepared{% endif %}. Holdings and movements as known to the holder's node; no descriptor or extended public key is disclosed.</p>
+  <p>{% if many %}Holder {{ r.label }}, {{ r.wallets | length }} wallets ({% for w in r.wallets %}{{ w.name }}{% if not loop.last %}, {% endif %}{% endfor %}); a move between them is sent by the one and received by the other, in neither the received nor the sent of the summary, its fee the holder's only cost{% elif r.wallets %}Holder {{ r.label }}, wallet {{ r.wallets[0].name }}{% if r.wallets[0].history and r.wallets[0].history.source == "file" %}, history kept {{ r.wallets[0].history.fetched_utc[:10] }} (the wallet was not loaded on the node){% endif %}{% else %}Wallet {{ r.label }}{% endif %}{% if r.policy == "1 of 1" %}, single key{% elif r.policy %}, {{ r.policy }} keys{% endif %}, {{ r.chain }} chain; opening figures at block {{ r.period.start.height }}, closing at block {{ r.period.end.height }}{% if r.period.to_date %}, the last block before the day of preparation{% endif %}. Holdings and movements as known to the holder's node; no descriptor or extended public key is disclosed.</p>
   <p>Prepared {{ r.generated_utc | utc }} by {{ r.tool }}; reference {{ r.report_id }}. With this statement: <code>{{ r.name | default("report") }}.json</code>, <code>{{ r.name | default("report") }}.csv</code>{% if r.proofs_files %} and the proofs, {% for f in r.proofs_files %}<code>{{ f.file }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}; <code>bip322 audit verify FILE</code> checks a proofs file against a node{% if r.closing.coins %}, and the commands on the UTXO pages paste as they stand{% endif %}. The tools: https://github.com/embeddednation/bip322-report.</p>
 </div>
 </div>

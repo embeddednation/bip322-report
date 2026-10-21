@@ -29,15 +29,17 @@ deliberately does not do. The proofs themselves are bip322-audit's business
   missing from the history changes the figures together, and the equation
   still holds.
 * **Node cross-check.** The check that compares the history with something
-  else: when the period ends at the tip the history was read at, the closing
-  coins must equal the node wallet's `listunspent`. It counts only while the
-  node's tip is the history's, before and after the call; otherwise it is
-  reported as not run, with the reason, which is not a failure. For an
-  output the statement has and `listunspent` lacks, `gettxout TXID VOUT
-  false` asks the chain alone: an output still there is spent by an
-  unconfirmed transaction (or is a coinbase output not yet mature) and is
-  noted; only an output the chain no longer has is a mismatch. For a period
-  that ends before the tip there is no such check, and completeness rests
+  else: while the closing coins are the present ones, they must equal the
+  node wallet's `listunspent`. That holds when no transaction of the
+  wallet's confirmed after the closing block (a year-end statement made in
+  January before anything moved; a statement to date) and the node's tip is
+  the history's, before and after the call; otherwise the check is reported
+  as not run, with the reason, which is not a failure. For an output the
+  statement has and `listunspent` lacks, `gettxout TXID VOUT false` asks
+  the chain alone: an output still there is spent by an unconfirmed
+  transaction (or is a coinbase output not yet mature) and is noted; only
+  an output the chain no longer has is a mismatch. Once coins have moved
+  after the closing block there is no such check, and completeness rests
   on the node wallet and the holder's representation.
 * **Dust** (`--dust SATS`, off by default). An output of at most the
   threshold that others paid to the wallet, in a transaction spending
@@ -49,14 +51,21 @@ deliberately does not do. The proofs themselves are bip322-audit's business
   it, as a movement of kind `swept` standing right before the spending
   transaction, which is itself unchanged: every amount and fee stays exact.
 * **Coverage.** A closing coin is covered when a verified proofs file carries a
-  proof for its address: every signature valid, the stamp block in the main
-  chain, no listed output contradicted by the node. A BIP-322 proof is about
-  the script behind an address, so it covers every output paid there, before
-  or after the proof was made; the report marks proofs that predate their
-  output (a change address proven before the spend was broadcast). Among
-  several proofs for an address the verified ones come first, then those whose
-  snapshot listed the very output, then the latest stamp; the others are
-  counted.
+  proof for its address stamped at or after the closing block: every
+  signature valid, the stamp block in the main chain, no listed output
+  contradicted by the node. A BIP-322 proof is about the script behind an
+  address, so it covers every output paid there; one stamped at the closing
+  block or later shows control at the period's end, which is the claim. A
+  proof stamped before the closing block shows control at an earlier block:
+  it is shown on the UTXO's page and in the JSON (`timing: before`), and it
+  does not cover. The report also marks proofs that predate their output (a
+  change address proven before the spend was broadcast). Among several
+  proofs for an address the verified ones come first, then the one at the
+  closing block, then the nearest after it, then the nearest before it, a
+  listing of the very output breaking ties; the others are counted. The
+  snapshot's `--before` takes the same instant as the statement's `--to`
+  and resolves to the same block, so the year-end snapshot is one command
+  and the summary names it when a proof is missing.
 * **On the chain.** Each closing UTXO is looked up at the block its proof
   names (`bip322 audit holdings TXID:VOUT --at HEIGHT`). Another
   scriptPubKey or amount than the statement's is a contradiction. A UTXO
@@ -67,9 +76,8 @@ deliberately does not do. The proofs themselves are bip322-audit's business
 * **The verdict.** `RESULT: OK` (exit status 0) when the reconciliation holds,
   every closing coin is covered, no lookup contradicts the statement, and
   the node cross-check either agrees or was not run; otherwise
-  `RESULT: ATTENTION` (exit status 1). A proof whose block is before the
-  period's end does not change the verdict: the summary counts the proofs
-  stamped after it, and each page names its proof's block.
+  `RESULT: ATTENTION` (exit status 1). Each page names its proof's block,
+  and the summary says how many proofs are at the closing block itself.
 * **The reference.** A hash of the facts stated: label, chain, the two
   blocks, the opening and closing coins, the movements (with their valuation
   when rates are given), and for each closing UTXO the proofs file, address and
@@ -83,13 +91,19 @@ Calendar bounds are instants in UTC. Each maps to the last block whose header
 time is before the instant, found by binary search over headers. Header times
 are not strictly monotonic, so the boundary is conventional rather than
 unique; the report prints the heights it used, and `--from-height/--to-height`
-reproduce any report exactly. An end instant in the future means the period
-runs to the tip, which is the tip the history was read at. An end instant in
-the past that the node has no block after (a node still syncing, or behind)
-is an error: the closing block is not settled. A start before the chain's
-first block opens on block 0. A cached history is used only against the
-chain it was read from: same network, its tip block still in the node's
-chain.
+reproduce any report exactly, or close a statement on the tip itself. An end
+instant that lies ahead, or no period at all, means to date: the statement
+closes on the last block before today 00:00 UTC, the night before (no higher
+than the tip the history was read at), which is the block `bip322 audit
+snapshot` stamps by default, so a snapshot and a statement of the same day
+agree without a word; the tip would move between the snapshot and the
+statement, and a proof could never be at or after it. The search for the
+last block before an instant is bip322-audit's (`header_before`), one copy
+for both. An end instant in the past that the node has no block after (a
+node still syncing, or behind) is an error: the closing block is not
+settled. A start before the chain's first block opens on block 0. A cached
+history is used only against the chain it was read from: same network, its
+tip block still in the node's chain.
 
 ## Why files in a tree and not a database
 

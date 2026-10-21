@@ -64,8 +64,8 @@ def build_report(
     which is per node wallet.
 
     ``cli`` is needed to re-verify the proofs files under ``proofs_roots`` against the chain and to
-    cross-check the closing balance with ``listunspent`` when the period runs
-    to the tip; without it the proofs are verified for their signatures only.
+    cross-check the closing balance with ``listunspent`` while the closing
+    coins are the present ones; without it the proofs are verified for their signatures only.
     Outputs of at most ``dust_sat`` satoshi that others paid to the wallet
     are dust and left out of every figure, as if they had never been the
     wallet's (``History.without_dust``; the wallet's own change is never
@@ -127,9 +127,9 @@ def build_report(
             "ok": closing_sat == opening_sat + net_sat,
         },
         "dust": _dust_block(dust, dust_sat, movements, created),
-        "coverage": _coverage(closing_rows, closing_sat),
+        "coverage": _coverage(closing_rows, closing_sat, period.end.height),
         "proofs_files": [
-            {**f.to_dict(), "after_period": int(f.stamp["height"]) > period.end.height, "used_for": used[f.path]}
+            {**f.to_dict(), "timing": _timing(int(f.stamp["height"]), period.end.height), "used_for": used[f.path]}
             for f in files
             if f.path in used
         ],
@@ -171,7 +171,7 @@ def build_report(
 
 def _closing_rows(history: History, closing: list[Coin], files: list, created: dict, period: Period) -> tuple[list[dict], dict[Path, int]]:
     """The closing coins as rows, each with the best proof there is for its address; and, per proofs file, the rows citing it."""
-    covers = cover_coins(closing, files)
+    covers = cover_coins(closing, files, period.end.height)
     spenders: dict[tuple, WalletTx] = {}  # outpoint -> the confirmed transaction that spends it: one pass, not History.spender_of per coin
     for tx in history.txs:
         for c in tx.ours_in:
@@ -183,7 +183,6 @@ def _closing_rows(history: History, closing: list[Coin], files: list, created: d
         proof = best.to_dict() if best else None
         if best:
             used[best.proofs.path] = used.get(best.proofs.path, 0) + 1
-            proof["after_period"] = int(proof["stamp"]["height"]) > period.end.height
         rows.append(
             {
                 **coin.to_dict(),
@@ -522,24 +521,42 @@ def _dust_block(dust: list[Coin], threshold_sat: int, movements: list[WalletTx],
     }
 
 
+def _timing(height: int, closing_height: int) -> str:
+    """Where a proof's block lies against the closing block: ``at``, ``after`` or ``before``."""
+    return "at" if height == closing_height else "after" if height > closing_height else "before"
+
+
 def _covered(row: dict) -> bool:
-    return bool(row["proof"] and row["proof"]["verified"])
+    """A verified proof stamped at or after the closing block: control at the period's end."""
+    return bool(row["proof"] and row["proof"]["verified"] and row["proof"]["timing"] in ("at", "after"))
 
 
-def _coverage(rows: list[dict], closing_sat: int) -> dict:
-    """How much of the closing balance a verified proof backs, by UTXO."""
+def _coverage(rows: list[dict], closing_sat: int, closing_height: int) -> dict:
+    """How much of the closing balance a verified proof at or after the closing block backs, by UTXO; and what the rest lacks:
+    a proof before the closing block only (``before_count``), or none that verifies (``missing_count``)."""
     uncovered = [r for r in rows if not _covered(r)]
     covered_sat = closing_sat - sum(r["amount_sat"] for r in uncovered)
+    before = [r for r in uncovered if r["proof"] and r["proof"]["verified"]]  # verified, but stamped before the closing block
     return {
+        "closing_height": closing_height,
         "covered_sat": covered_sat,
         "covered_btc": btc(covered_sat),
         "uncovered_sat": closing_sat - covered_sat,
         "uncovered_btc": btc(closing_sat - covered_sat),
         "covered_count": len(rows) - len(uncovered),
-        "covered_after_period_count": sum(1 for r in rows if _covered(r) and r["proof"]["after_period"]),
+        "at_closing_count": sum(1 for r in rows if _covered(r) and r["proof"]["timing"] == "at"),
+        "before_count": len(before),
+        "missing_count": len(uncovered) - len(before),
         "total_count": len(rows),
         "complete": not uncovered,
-        "uncovered": [{k: r[k] for k in ("txid", "vout", "address", "amount_sat", "amount_btc")} for r in uncovered],
+        "uncovered": [
+            {
+                **{k: r[k] for k in ("txid", "vout", "address", "amount_sat", "amount_btc")},
+                "wallet": r.get("wallet"),
+                "proof_height": int(r["proof"]["stamp"]["height"]) if r in before else None,
+            }
+            for r in uncovered
+        ],
     }
 
 
@@ -834,11 +851,11 @@ def _report_id(report: dict) -> str:
 def _node_checks(clis: Mapping[str, BitcoinCli], history: History, period: Period, closing: list[Coin], dust: list[Coin]) -> dict | None:
     """A holder's node check: each loaded wallet's node wallet against that wallet's own closing coins, the results as one.
 
-    None when the period does not end at the tip (no wallet's check runs); ``ok`` None with every reason when a wallet's
-    could not run; else ``ok`` when each wallet's is, the counts added up, the lists joined, and ``wallets`` the ones checked.
+    None when no wallet's check runs; ``ok`` None with every reason when a wallet's could not run; else ``ok`` when each
+    wallet's is, the counts added up, the lists joined, and ``wallets`` the ones checked.
     """
     checks = {
-        w: _node_check(c, history, period, [x for x in closing if x.wallet == w], [x for x in dust if x.wallet == w])
+        w: _node_check(c, history, period, [x for x in closing if x.wallet == w], [x for x in dust if x.wallet == w], wallet=w)
         for w, c in clis.items()
     }
     found = {w: c for w, c in checks.items() if c is not None}
@@ -858,19 +875,31 @@ def _node_checks(clis: Mapping[str, BitcoinCli], history: History, period: Perio
     return merged
 
 
-def _node_check(cli: BitcoinCli, history: History, period: Period, closing: list[Coin], dust: list[Coin] = ()) -> dict | None:
-    """When the period ends at the history's tip, the node's listunspent must agree with the closing coins (``dust`` left out on both sides).
+def _node_check(
+    cli: BitcoinCli, history: History, period: Period, closing: list[Coin], dust: list[Coin] = (), *, wallet: str | None = None
+) -> dict | None:
+    """The node's listunspent must agree with the closing coins (``dust`` left out on both sides).
 
-    listunspent tells the present only, so the check counts only when the
-    node's tip is the history's, before and after it: otherwise it is not
+    listunspent tells the present only, so the check counts only while the
+    closing coins are the present ones: no transaction of the wallet's (of
+    ``wallet``'s, for a holder) confirmed after the closing block, and the
+    node's tip the history's, before and after the call.  Otherwise it is not
     run (``ok`` None, with the reason), which is not a failure.  A node
     wallet also leaves out of listunspent what an unconfirmed transaction
     spends, and a coinbase output until it matures: for every output the
     statement has and listunspent lacks, ``gettxout TXID VOUT false`` asks
     the chain alone, and only an output the chain no longer has is a mismatch.
     """
-    if period.end.height != history.tip_height:
-        return None
+    moved = [
+        tx
+        for tx in history.txs
+        if tx.height is not None
+        and tx.height > period.end.height
+        and (wallet is None or any(c.wallet == wallet for c in tx.ours_in + tx.ours_out))
+    ]
+    if moved:
+        n = len(moved)
+        return {"ok": None, "reason": f"coins moved after the closing block {period.end.height} ({n} transaction{'s' if n != 1 else ''})"}
     try:
         if cli.tip()[1] != history.tip_hash:
             return {"ok": None, "reason": f"the node's tip is not the history's (block {history.tip_height})"}
@@ -935,17 +964,31 @@ def previous_statement(archive: Path | None, report: dict) -> dict | None:
 def format_summary(report: dict) -> str:
     """The terse text summary printed on stderr."""
     p, r, c = report["period"], report["reconciliation"], report["coverage"]
+    lacking = [f"{c['before_count']} proven before it"] if c["before_count"] else []
+    lacking += [f"{c['missing_count']} without proof"] if c["missing_count"] else []
     lines = [
         f"{report['label']}: {p['label']}  blocks {p['start']['height']} -> {p['end']['height']}"
-        + ("  (to tip)" if p["to_tip"] else "")
+        + ("  (to date)" if p["to_date"] else "")
         + f"  ref {report['report_id']}",
         f"opening {report['opening']['total_btc']} BTC  closing {report['closing']['total_btc']} BTC  net {report['totals']['net_btc']} BTC  "
         f"({report['totals']['transactions']} transactions, fees {report['totals']['fees_btc']} BTC)",
         f"reconciliation: {'ok' if r['ok'] else 'FAILED (diff ' + btc(r['diff_sat']) + ' BTC)'}",
-        f"proof coverage: {c['covered_count']}/{c['total_count']} closing outputs, {c['covered_btc']} BTC; "
-        f"stamped after the period's end: {c['covered_after_period_count']}/{c['total_count']}"
-        + ("" if c["complete"] else f"; UNCOVERED {c['uncovered_btc']} BTC"),
+        f"proof coverage: {c['covered_count']}/{c['total_count']} closing outputs, {c['covered_btc']} BTC, proven at or after the closing "
+        f"block {c['closing_height']}"
+        + (
+            " (after it)"
+            if c["covered_count"] and not c["at_closing_count"]
+            else f" ({c['at_closing_count']} at it)"
+            if c["at_closing_count"] != c["covered_count"]
+            else ""
+        )
+        + ("" if c["complete"] else f"; UNPROVEN {c['uncovered_btc']} BTC: " + ", ".join(lacking)),
     ]
+    if not c["complete"] and c["total_count"]:
+        wallets = sorted({u["wallet"] for u in c["uncovered"] if u.get("wallet")})
+        lines += [f"  to prove: bip322 audit snapshot -w {w} --at {c['closing_height']}" for w in wallets] or [
+            f"  to prove: bip322 audit snapshot --at {c['closing_height']}"
+        ]
     prev = report.get("previous")
     if prev:
         lines.append(

@@ -4,7 +4,11 @@ Opening figures are "after every block up to and including ``start_height``";
 closing figures likewise for ``end_height``; movements are the transactions
 confirmed in between.  A calendar period ``[start, end)`` in UTC maps to the
 last block *before* each instant, so a year's report opens on the last block
-of the previous year and closes on the last block of the year.
+of the previous year and closes on the last block of the year.  An end that
+lies ahead means to date: the statement closes on the last block before
+today 00:00 UTC, the night before, which is the block ``bip322 audit
+snapshot`` stamps by default, so a snapshot and a statement of the same day
+agree on their block without a word.
 """
 
 from __future__ import annotations
@@ -13,6 +17,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from bip322audit.rpc import BitcoinCli
+from bip322audit.stamp import header_before, parse_when
+
+__all__ = [
+    "Block",
+    "Period",
+    "block",
+    "last_block_before",
+    "parse_when",
+    "period_between",
+    "period_for_heights",
+    "period_for_year",
+    "start_of_today",
+]
 
 
 @dataclass(frozen=True)
@@ -28,6 +45,10 @@ class Block:
     def to_dict(self) -> dict:
         return {"height": self.height, "hash": self.hash, "time": self.time, "time_utc": self.iso_time}
 
+    @classmethod
+    def from_header(cls, header: dict) -> Block:
+        return cls(int(header["height"]), str(header["hash"]), int(header["time"]))
+
 
 @dataclass(frozen=True)
 class Period:
@@ -36,7 +57,7 @@ class Period:
     end: Block  # closing balance is as of this block
     start_when: str | None = None  # the instants asked for, when the period came from dates
     end_when: str | None = None
-    to_tip: bool = False  # the end instant lies in the future: the period runs to the chain tip
+    to_date: bool = False  # the end instant lay ahead (or none was given): closed on the last block before today 00:00 UTC
 
     def to_dict(self) -> dict:
         return {
@@ -45,17 +66,8 @@ class Period:
             "end_when": self.end_when,
             "start": self.start.to_dict(),
             "end": self.end.to_dict(),
-            "to_tip": self.to_tip,
+            "to_date": self.to_date,
         }
-
-
-def parse_when(text: str) -> datetime:
-    """``YYYY-MM-DD`` (midnight UTC) or an ISO 8601 instant; naive times are UTC."""
-    text = text.strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    when = datetime.fromisoformat(text)
-    return when.replace(tzinfo=UTC) if when.tzinfo is None else when.astimezone(UTC)
 
 
 def block(cli: BitcoinCli, height: int) -> Block:
@@ -63,51 +75,47 @@ def block(cli: BitcoinCli, height: int) -> Block:
     return Block(int(header["height"]), header["hash"], int(header["time"]))
 
 
-def last_block_before(cli: BitcoinCli, when: datetime) -> Block:
-    """The highest block whose header time is before ``when`` (binary search over header times).
+def last_block_before(cli: BitcoinCli, when: datetime, *, tip_height: int | None = None) -> Block:
+    """The highest block whose header time is before ``when`` (bip322-audit's search, the one the snapshot's ``--before`` uses).
 
     Header times are not strictly monotonic, so this is the natural boundary
     rather than a mathematically unique one; the report prints the height it
-    used, which is what makes it reproducible.
+    used, which is what makes it reproducible.  ``tip_height``: no higher than
+    this, the tip of the history the statement is built from.
     """
-    ts = int(when.timestamp())
-    tip_height, _ = cli.tip()
-    lo, hi = 0, tip_height
-    if block(cli, 0).time >= ts:
-        return block(cli, 0)  # the chain starts inside the period: nothing precedes its first block
-    while lo < hi:
-        mid = (lo + hi + 1) // 2
-        if block(cli, mid).time < ts:
-            lo = mid
-        else:
-            hi = mid - 1
-    return block(cli, lo)
+    return Block.from_header(header_before(cli, when, tip_height=tip_height))
 
 
 def _now() -> datetime:
     return datetime.now(UTC)  # in one place, so a test on a fake chain can set the clock to that chain's present
 
 
+def start_of_today() -> datetime:
+    """Today 00:00 UTC by the statement's clock: the instant a statement to date closes before."""
+    return _now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def period_between(cli: BitcoinCli, start: datetime, end: datetime, label: str | None = None, *, tip_height: int | None = None) -> Period:
     """The period ``[start, end)``: from the last block before ``start`` to the last block before ``end``.
 
-    An end in the future means the period runs to the tip: ``tip_height`` when
-    given (the tip of the history the statement is built from, so a block
-    that arrives after the history was read cannot open a gap), else the
-    node's.  An end in the past needs a block at or after it: until the node
-    has one, the last block before the end is not settled (the node is behind,
-    or the next block is yet to come), and closing on the tip would state a
-    year-end that is not one.
+    An end that lies ahead means the period runs to date: it closes on the
+    last block before today 00:00 UTC (the tip when the node has no block
+    after that yet), no higher than ``tip_height`` when given (the tip of the
+    history the statement is built from, so a block that arrives after the
+    history was read cannot open a gap).  An end in the past needs a block at
+    or after it: until the node has one, the last block before the end is not
+    settled (the node is behind, or the next block is yet to come), and
+    closing on the tip would state a year-end that is not one.
     """
     if end <= start:
         raise ValueError("the period's end must be after its start")
     info = cli.call("getblockchaininfo")
     node_tip = int(info["blocks"])
     start_block = last_block_before(cli, start)
-    to_tip = end > _now()
+    to_date = end > _now()
     fmt = "%Y-%m-%dT%H:%M:%SZ"
-    if to_tip:
-        end_block = block(cli, node_tip if tip_height is None else tip_height)
+    if to_date:
+        end_block = last_block_before(cli, start_of_today(), tip_height=tip_height)
     else:
         if info.get("initialblockdownload"):
             raise ValueError(f"the node is still syncing (at block {node_tip}): the last block before {end.strftime(fmt)} is not known yet")
@@ -118,14 +126,17 @@ def period_between(cli: BitcoinCli, start: datetime, end: datetime, label: str |
                 "the node is behind, or no later block exists yet, so the closing block is not settled"
             )
     if end_block.height <= start_block.height:
-        raise ValueError(f"no block lies inside the period (both ends resolve to height {start_block.height})")
+        raise ValueError(
+            f"no block lies inside the period (both ends resolve to height {start_block.height})"
+            + ("; a period to date closes on the last block before today 00:00 UTC" if to_date else "")
+        )
     return Period(
         label or f"{start.strftime('%Y-%m-%d')}..{end.strftime('%Y-%m-%d')}",
         start_block,
         end_block,
         start.strftime(fmt),
         end.strftime(fmt),
-        to_tip,
+        to_date,
     )
 
 

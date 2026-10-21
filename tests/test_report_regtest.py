@@ -7,6 +7,7 @@ or run refcheck/fetch.sh in a bip322-core checkout that is installed alongside.
 import csv
 import json
 import os
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -70,8 +71,9 @@ def private_descriptors(masters):
     return out
 
 
-def _bundle(directory: Path, watch: BitcoinCli, wallet: Wallet, signers, template: str, skip=None, addresses=None) -> dict:
-    snapshot, psbts = take_snapshot(watch, wallet, template, depth=1, skip_addresses=skip, addresses=addresses)
+def _bundle(directory: Path, watch: BitcoinCli, wallet: Wallet, signers, template: str, skip=None, addresses=None, **choice) -> dict:
+    """A snapshot (by default at the night before: the tip, the blocks being dated yesterday), signed by two cosigners, finalized."""
+    snapshot, psbts = take_snapshot(watch, wallet, template, skip_addresses=skip, addresses=addresses, **choice)
     write_snapshot(directory, snapshot, psbts)
     for entry in snapshot.addresses:
         psbt = parse_psbt((directory / entry["file"]).read_text())
@@ -85,6 +87,7 @@ def _bundle(directory: Path, watch: BitcoinCli, wallet: Wallet, signers, templat
 
 def test_reports_workflow_on_regtest(core, regtest_wallet, signer_expressions, private_descriptors, tmp_path):
     node = BitcoinCli(core.cli_argv())
+    node.call("setmocktime", int(time.time()) - 86400)  # the blocks are dated yesterday: a statement to date closes on the tip
     node.call("createwallet", "miner")
     miner = BitcoinCli([*core.cli_argv(), "-rpcwallet=miner"])
     watch = BitcoinCli([*core.cli_argv(), "-rpcwallet=watch"])
@@ -108,14 +111,19 @@ def test_reports_workflow_on_regtest(core, regtest_wallet, signer_expressions, p
     funded = watch.call("walletcreatefundedpsbt", [], [{mine_to: 0.2}], 0, {"subtractFeeFromOutputs": [0], "changeAddress": change})
     decoded = node.call("decodepsbt", funded["psbt"])
     assert change in [o["scriptPubKey"]["address"] for o in decoded["tx"]["vout"]]
-    second = _bundle(ledger / "snapshot-change", watch, regtest_wallet, signer_expressions, "Owner proof {date}", addresses=[change])
+    second = _bundle(
+        ledger / "snapshot-change", watch, regtest_wallet, signer_expressions, "Owner proof {date}", addresses=[change], depth=1
+    )
     assert second["proofs"][0]["address"] == change and second["proofs"][0]["utxos"] == []
     signed = node.call("descriptorprocesspsbt", funded["psbt"], private_descriptors)
     assert signed["complete"]
     spend_txid = node.call("sendrawtransaction", signed["hex"])
     miner.call("generatetoaddress", 2, mine_to)  # spend at 104, tip 105
-    with pytest.raises(Exception, match="already proven"):  # nothing left to prove: the change address is covered
+    with pytest.raises(Exception, match="already proven"):  # nothing left to prove ahead of use: the change address is covered
         take_snapshot(watch, regtest_wallet, "x", depth=1, skip_addresses=proven_addresses([ledger]))
+    # the year-end snapshot: every coin at the closing block, the tip, which a statement to date closes on
+    year_end = _bundle(ledger / "snapshot-year-end", watch, regtest_wallet, signer_expressions, "Proof of control {date}")
+    assert int(year_end["stamp"]["height"]) == 105
 
     # ---- the report over the whole life of the wallet -------------------------- #
     history = fetch_history(watch)
@@ -128,8 +136,8 @@ def test_reports_workflow_on_regtest(core, regtest_wallet, signer_expressions, p
         and spend.fee_sat
         and spend.net_sat == -sum(c.amount_sat for c in spend.ours_in) + sum(c.amount_sat for c in spend.ours_out)
     )
-    period = period_for_year(watch, YEAR)  # regtest genesis is 2011; the year has not ended, so the period runs to the tip
-    assert period.start.height == 0 and period.end.height == 105 and period.to_tip
+    period = period_for_year(watch, YEAR)  # regtest genesis is 2011; the year has not ended: to date, the last block before today
+    assert period.start.height == 0 and period.end.height == 105 and period.to_date
     report = build_report(history, period, label="regtest", proofs_roots=[ledger], cli=watch)
     assert report["ok"], json.dumps(report["coverage"], indent=2) + json.dumps(report["node_check"])
     assert report["opening"]["total_sat"] == 0 and report["closing"]["total_sat"] == history.balance_at(105)
@@ -138,11 +146,13 @@ def test_reports_workflow_on_regtest(core, regtest_wallet, signer_expressions, p
     closing = history.coins_at(105)  # Core's coin selection decides whether the 0.1 output survives the spend
     assert report["coverage"]["complete"] and report["coverage"]["total_count"] == len(closing) in (1, 2)
     used = {f["file"].removesuffix("-proofs.json"): f["used_for"] for f in report["proofs_files"]}
-    relied_on = {"snapshot-first": len(closing) - 1, "snapshot-change": 1}  # a bundle no closing UTXO relies on is not listed, only counted
-    assert used == {k: n for k, n in relied_on.items() if n} and report["proofs_files_not_used"] == 2 - len(used)
-    assert all(b["verified"] for b in report["proofs_files"])
+    assert (
+        used == {"snapshot-year-end": len(closing)} and report["proofs_files_not_used"] == 2
+    )  # the earlier ones are before the closing block
+    assert all(b["verified"] and b["timing"] == "at" for b in report["proofs_files"])
     change_row = next(c for c in report["closing"]["coins"] if c["address"] == change)
-    assert change_row["proof"]["before_output"] and not change_row["proof"]["lists_output"]
+    assert change_row["proof"]["lists_output"] and not change_row["proof"]["before_output"] and change_row["proof"]["timing"] == "at"
+    assert report["coverage"]["at_closing_count"] == len(closing)
     assert report["node_check"]["ok"] and report["reconciliation"]["ok"]
     html = render_html(report)
     assert "pill bad" not in html and spend_txid in html

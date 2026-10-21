@@ -2,12 +2,14 @@
 
 The wallets' proofs files (in their directories, or wherever ``--snapshots``
 points) are read and each is re-verified against the node at report time.  A
-coin is *covered* when a verified proof exists for its address: a BIP-322 proof
-is about the script behind an address, so it covers every output paid there,
-whether the proof was made before the output existed (a change address proven
-before the spend was broadcast) or after (a snapshot that listed it).  Among
-several proofs the verified ones come first, then those whose snapshot listed
-the exact output, then the latest stamp; all are kept for the record.
+coin is *covered* when a verified proof exists for its address, stamped at or
+after the statement's closing block: a BIP-322 proof is about the script
+behind an address, so it covers every output paid there, and one stamped at
+the closing block or later shows control at the period's end.  A proof
+stamped before the closing block shows control at an earlier block, which is
+not the claim; it is shown, and does not cover.  Among several proofs the
+verified ones come first, then the one at the closing block, then the nearest
+after it, then the nearest before it; all are kept for the record.
 """
 
 from __future__ import annotations
@@ -94,6 +96,7 @@ class Cover:
     state: str  # the signature's verdict now
     lists_output: bool  # the snapshot listed this very output
     coin_height: int | None = None
+    closing_height: int | None = None  # the statement's closing block, which the proof's stamp is placed against
 
     @property
     def verified(self) -> bool:
@@ -103,6 +106,26 @@ class Cover:
     def before_output(self) -> bool:
         """The proof was made before the output existed (an address proven ahead of use)."""
         return self.coin_height is not None and int(self.proofs.stamp["height"]) < self.coin_height
+
+    @property
+    def timing(self) -> str | None:
+        """Where the proof's block lies against the closing block: ``at``, ``after`` or ``before``; None without a closing block."""
+        if self.closing_height is None:
+            return None
+        height = int(self.proofs.stamp["height"])
+        return "at" if height == self.closing_height else "after" if height > self.closing_height else "before"
+
+    @property
+    def covers(self) -> bool:
+        """Verified, and stamped at or after the closing block: what the statement counts as proof of control at the period's end."""
+        return self.verified and self.timing in ("at", "after")
+
+    def _order(self) -> tuple:
+        """Best first: verified, at the closing block, the nearest after it, the nearest before it, listing the output, by file."""
+        height = int(self.proofs.stamp["height"])
+        closing = self.closing_height if self.closing_height is not None else height
+        rank = 0 if height == closing else 1 if height > closing else 2
+        return (not self.verified, rank, abs(height - closing), not self.lists_output, self.proofs.name)
 
     def to_dict(self) -> dict:
         verdict = self.proofs.verdict(self.address) or {}
@@ -121,6 +144,7 @@ class Cover:
             "verdict": {k: verdict.get(k) for k in ("state", "reason", "engines")},
             "lists_output": self.lists_output,
             "before_output": self.before_output,
+            "timing": self.timing,
         }
 
 
@@ -200,8 +224,9 @@ def proofs_names(paths) -> dict[Path, str]:
     return names
 
 
-def cover_coins(coins: list[Coin], files: list[ProofsFile]) -> dict[Outpoint, list[Cover]]:
-    """For each coin, the proofs for its address, best first (verified, then listing the output, then latest stamp)."""
+def cover_coins(coins: list[Coin], files: list[ProofsFile], closing_height: int | None = None) -> dict[Outpoint, list[Cover]]:
+    """For each coin, the proofs for its address, best first: verified, at the closing block, the nearest after it, the nearest
+    before it, listing the output."""
     by_outpoint: dict[Outpoint, list[Cover]] = {c.outpoint: [] for c in coins}
     at_address: dict[str, list[Coin]] = {}
     for coin in coins:
@@ -221,10 +246,11 @@ def cover_coins(coins: list[Coin], files: list[ProofsFile]) -> dict[Outpoint, li
                         file.proof_state(proof["address"]),
                         coin.outpoint in listed,
                         coin.height,
+                        closing_height,
                     )
                 )
     for covers in by_outpoint.values():
-        covers.sort(key=lambda c: (not c.verified, not c.lists_output, -int(c.proofs.stamp["height"])))
+        covers.sort(key=Cover._order)  # noqa: SLF001
     return by_outpoint
 
 

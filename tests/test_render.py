@@ -16,12 +16,12 @@ from bip322report.report import build_report
 
 
 def _report(tmp_path, wallet, signers, template="Owner proof {date}", ledger=True) -> dict:
-    """Three closing UTXOs at the tip, each with a proof from one bundle (or none, without a ledger)."""
+    """Three closing UTXOs of a period closed at 998, each with a proof from one bundle at the tip, 1000 (or none, without a ledger)."""
     node = _node(wallet, tip=1000)
     if ledger:
         _bundle(tmp_path / "ledger" / "snapshot-1", node, wallet, signers, template)
     roots = [tmp_path / "ledger"] if ledger else []
-    period = period_for_heights(node, 985, 1000, label="test")
+    period = period_for_heights(node, 985, 998, label="test")
     return build_report(fetch_history(node), period, label="Treasury", proofs_roots=roots, cli=node)
 
 

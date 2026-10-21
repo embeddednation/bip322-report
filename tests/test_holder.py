@@ -251,7 +251,7 @@ def test_the_statement_is_the_holders(wallet, tmp_path, monkeypatch, capsys):
     )
     written = json.loads((directory / f"company-{date}.json").read_text())
     assert written["label"] == "Company AB" and [w["name"] for w in written["wallets"]] == ["treasury", "cold"]
-    assert written["period"]["start"]["height"] == 1000 and written["period"]["end"]["height"] == 1010 and written["period"]["to_tip"]
+    assert written["period"]["start"]["height"] == 1000 and written["period"]["end"]["height"] == 1010 and written["period"]["to_date"]
     blocks = csv_blocks(directory / f"company-{date}.csv")
     assert [(r["category"], r["wallet"]) for r in blocks["treasury"]] == [
         ("receive", "Exchange"),

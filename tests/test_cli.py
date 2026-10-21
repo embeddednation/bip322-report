@@ -313,8 +313,8 @@ def test_a_node_that_is_not_past_the_periods_end_is_an_error(wallet, run, monkey
         assert period_for_heights(node, 1000, 1012).end.height == 1012  # heights say which blocks: allowed, also up to the tip
 
 
-def test_a_period_to_the_tip_closes_on_the_historys_tip(wallet, run, monkeypatch):
-    """Finding 13: a block arriving after the history was read made a to-tip period fail with "the history is older"."""
+def test_a_period_to_date_closes_no_higher_than_the_historys_tip(wallet, run, monkeypatch):
+    """Finding 13: a block arriving after the history was read made a to-date period fail with "the history is older"."""
     node = _node(wallet, tip=1012)
     _member(node)
     read = cli_module.fetch_history
@@ -328,15 +328,15 @@ def test_a_period_to_the_tip_closes_on_the_historys_tip(wallet, run, monkeypatch
     code, _, err = run(node, "report", "--from", "2023-11-14", "--to", "2099-01-01", "-o", "t")
     assert code == 1 and "older than" not in err
     period = json.loads(_written("t", ".json").read_text())["period"]
-    assert period["to_tip"] and period["end"]["height"] == 1012 and period["label"] == "2023-11-14..2099-01-01"
+    assert period["to_date"] and period["end"]["height"] == 1012 and period["label"] == "2023-11-14..2099-01-01"
     start = datetime.fromtimestamp(block_time(100), UTC)
     assert period_between(node, start, datetime(2099, 1, 1, tzinfo=UTC)).end.height == 1015  # without a history: the node's tip
-    # the clock set to the fake chain's present: the year is not over, so it runs to the tip too
-    monkeypatch.setattr("bip322report.period._now", lambda: datetime.fromtimestamp(block_time(1012) + 60, UTC))
+    # the clock set to the morning after the fake chain's tip: the year is not over, so it runs to date, the tip
+    monkeypatch.setattr("bip322report.period._now", lambda: datetime.fromtimestamp(block_time(1012) + 86400, UTC))
     node.tip_height = 1012  # the block arrives after the read again
     assert run(node, "report", "--year", "2023", "-o", "y")[0] == 1
     period = json.loads(_written("y", ".json").read_text())["period"]
-    assert period["to_tip"] and period["end"]["height"] == 1012 and period["label"] == "2023"
+    assert period["to_date"] and period["end"]["height"] == 1012 and period["label"] == "2023"
 
 
 def test_a_history_from_another_chain_or_a_reorged_tip_is_refused(wallet, run):

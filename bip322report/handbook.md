@@ -21,12 +21,16 @@ given as its argument.
   the keys that control a scriptPubKey. Its message ends with a block line,
   `block: HEIGHT HASH TIME`, which dates it: a proof cannot be older than
   the block it names. Control of a scriptPubKey covers every UTXO locked to
-  it, before or after the proof; a UTXO that arrived after the proof is
-  covered only by a later proof.
-* **A snapshot** is one round of proofs: `bip322 audit snapshot` (every
-  funded address) or `prove` (given addresses) writes `snapshot.json`,
+  it; the statement wants, for every closing UTXO, a proof dated at its
+  closing block or after it, since that is control at the period's end.
+* **A snapshot** is one round of proofs at one block: `bip322 audit
+  snapshot` (every funded address, with the wallet's coins at that block,
+  spent since or not) or `prove` (given addresses) writes `snapshot.json`,
   `message.txt` and `to_sign/to_sign-NN.psbt`, one per address; the signers
-  fill `signed/`; `finalize` writes the proofs file.
+  fill `signed/`; `finalize` writes the proofs file. The block is the last
+  one before an instant (`--before 2027-01-01`: the last block of 2026), a
+  named one (`--at`), or by default the last block before today 00:00 UTC,
+  the night before, which a statement to date closes on.
 * **A proofs file**, `<wallet>-<date>-<height>-proofs.json`, is the only
   thing an auditor needs from a snapshot. It names addresses, proofs and
   outputs, and the policy (`2 of 3`); it carries no descriptor, xpub,
@@ -57,17 +61,17 @@ else; the holder's holds its wallets and its statements:
     statements/                           # the holder's statements over its wallets
       2026/
         company-2026.pdf  company-2026.json  company-2026.csv
-        treasury-2026-10-09-920114-proofs.json   # the proofs files the statement cites
+        treasury-2026-12-31-931871-proofs.json   # the proofs files the statement cites
         company-2026-history.pdf          # the movements for a reader: no proofs, no txids
-      2026-10-15/                         # to date: labelled by the tip's date
+      2026-10-20/                         # to date: labelled by its closing block's date, the night before
     treasury/                             # a wallet of the holder
       2026-03-02-880412/                  # a prove during the year
-      2026-10-09-920114/                  # the year-end snapshot
+      2026-12-31-931871/                  # the year-end snapshot: the last block of 2026
         snapshot.json  message.txt  to_sign/  signed/
-        treasury-2026-10-09-920114-proofs.json
+        treasury-2026-12-31-931871-proofs.json
       history.json                        # the history last read from the node
     cold/
-      2026-10-09-920114/
+      2026-12-31-931871/
       history.json
 ```
 
@@ -132,7 +136,7 @@ The statement is the holder's, over every wallet under its directory:
 
 ```sh
 bip322 report --year 2026             # -> company/statements/2026/: company-2026.pdf (or .html), .json, .csv, -history.pdf
-bip322 report company                 # to date: -> company/statements/2026-10-15/, labelled by the tip's date
+bip322 report company                 # to date: -> company/statements/2026-10-20/, closing on the night before
 ```
 
 A holder is a directory of the tree, and its wallets are the wallet
@@ -150,7 +154,11 @@ amount, the fee with the sender. A holder of one wallet gets the same
 document without the split. The opening line cites the statement
 in the tree that closed at this one's opening block, by label and reference,
 so the statements chain. Without a period the statement runs from the block
-before the first transaction to the tip and is labelled by the tip's date. The
+before the first transaction to the last block before today 00:00 UTC, the
+night before, and is labelled by that block's date; a period whose end lies
+ahead (`--year` of the current year) closes there too. That is the block
+`bip322 audit snapshot` stamps by default, so a snapshot and a statement of
+the same day agree on their block. The
 CSV has six columns in one block per wallet, the wallet's name on a
 line of its own above the header (a holder of one wallet: that wallet's rows
 alone): the movements as that wallet sees them, the
@@ -203,16 +211,19 @@ through `bitcoin-cli`; `--cli "bitcoin-cli -signet"` or `cli` in
 
 ### At year end: the full snapshot
 
-Some days into January, when the closing block is buried:
+Once the year is over, whenever suits:
 
 ```sh
-bip322 audit snapshot                 # -> company/treasury/2026-01-08-931871/
+bip322 audit snapshot --before 2027-01-01   # -> company/treasury/2026-12-31-931871/
 ```
 
-The stamp is the block six behind the tip; the snapshot lists every funded
-address and writes one `to_sign` PSBT per address. This is a **full**
-snapshot, not `--skip-proven`: every closing UTXO must have a proof dated
-after the closing block, including change proven earlier in the year.
+The stamp is the last block of 2026, the block the statement of 2026 closes
+on, and the snapshot lists the wallet's coins at that block, what it has
+spent since included (from the node wallet's own history), with one
+`to_sign` PSBT per address. This is a **full** snapshot, not `--skip-proven`:
+the statement wants, for every closing UTXO, a proof dated at the closing
+block or after it, change proven earlier in the year included. A proof from
+earlier in the year shows control then, not at the year's end.
 
 ### Signing on the devices
 
@@ -240,24 +251,28 @@ bip322 report --year 2026             # -> company/statements/2026/
 
 The audit commands take the wallet from `-w`, else from the wallet directory
 they run in, else from `bip322.toml`, else from the node; `finalize` and
-`verify` take a snapshot's name (`finalize 2026-01-08-931871`) or a path when
+`verify` take a snapshot's name (`finalize 2026-12-31-931871`) or a path when
 the newest is not the one meant. `bip322 report` takes the holder: the word
 after the options, else the holder whose directory it runs in, else `holder`
 in `bip322.toml`, else the tree's one.
 
 `bip322 report` reads each wallet's history from the node, verifies every
 proofs file in the wallets' directories against the node, picks for each
-closing UTXO a proof of its script (a verified one first, then one whose
-snapshot lists that very UTXO, then the newest), looks each UTXO up on the
-chain at the block of its proof, cross-checks the node's `listunspent` when
-the period ends at the tip, and prints a summary ending in `RESULT: OK`
-(exit status 0) or `RESULT: ATTENTION` (exit status 1); an error exits 2.
-ATTENTION means the reconciliation failed, a closing UTXO has no verified
-proof, a lookup on the chain contradicts the statement, or the node wallet
-disagrees with the closing UTXOs. A proof whose block is before the period's
-end, or a UTXO spent after the period, is shown on the UTXO's page and is
-not a failed check. On a node that has no block after the period's end yet
-(still syncing, or behind), it refuses: the closing block is not settled.
+closing UTXO a proof of its script dated at or after the closing block (a
+verified one first, then the one at the closing block, then the nearest
+after it; a proof from before the closing block is shown but does not
+count), looks each UTXO up on the chain at the block of its proof,
+cross-checks the node's `listunspent` when nothing of the wallet's moved
+after the closing block, and prints a summary ending in `RESULT: OK` (exit
+status 0) or `RESULT: ATTENTION` (exit status 1); an error exits 2.
+ATTENTION means the reconciliation failed, a closing UTXO has no valid proof
+at or after the closing block, a lookup on the chain contradicts the
+statement, or the node wallet disagrees with the closing UTXOs; for the
+proofs, the summary names the snapshot to take (`bip322 audit snapshot -w
+treasury --at 931871`). A UTXO spent after the period is shown on its page
+and is not a failed check. On a node that has no block after the period's
+end yet (still syncing, or behind), it refuses: the closing block is not
+settled.
 
 The statement is the PDF when WeasyPrint is installed (`[pdf]`), else one
 HTML file with the fonts inside it; `--html` asks for the HTML regardless.
@@ -290,15 +305,16 @@ wallet's xpubs.
 prove it before broadcasting:
 
 ```sh
-bip322 audit prove bc1q…change…       # -> treasury/<date>-<height>/
+bip322 audit prove bc1q…change…       # -> treasury/<date>-<height>/, a recent block
 # sign to_sign/*.psbt, put the results in signed/, then
 bip322 audit finalize                 # VALID -> broadcast
 ```
 
-A valid proof means the quorum controls where the change goes. In a
-statement produced before the year-end snapshot, that UTXO shows AFTER THE
-PROOF (received after the block its proof names); the year-end snapshot
-gives it a proof dated after it.
+A valid proof means the quorum controls where the change goes: it is the
+holder's own check, before the coins move. In a statement it counts only
+when its block is at or after the closing block, which it rarely is; the
+year-end snapshot gives the change a proof at the closing block, and until
+then the statement shows the change UTXO as proven before it.
 
 **New deposit addresses.** Prove them the same way, or after the fact:
 
@@ -310,10 +326,19 @@ which takes a snapshot over the funded addresses no earlier snapshot of the
 wallet proves, and exits non-zero saying so when there are none (in a
 script, treat that as "nothing to do").
 
-**A statement at any time.** `bip322 report --from 2026-01-01 --to 2026-07-01`,
-or `--year`, or block heights. Everything in it is backed by the holder's own
-proofs; the year-end statement is the same document with the year-end
-snapshot.
+**A statement at any time.** Take the snapshot and the statement on the same
+day: both close on the last block before today 00:00 UTC, the night before.
+
+```sh
+bip322 audit snapshot                 # the wallet's coins at the night before
+# sign, then bip322 audit finalize
+bip322 report                         # to date: closes on the same block
+```
+
+For a period, give both the same instant: `bip322 audit snapshot --before
+2026-07-01` and `bip322 report --from 2026-01-01 --to 2026-07-01` close on
+the same block. The year-end statement is the same document with the
+year-end snapshot.
 
 ## The auditor's procedure
 
@@ -335,10 +360,11 @@ script interpreter as a second engine; bip322-report is not needed to verify).
    transaction was funded by the wallet and by others: its fee is unknown
    and shown as such, its amount is the wallet's net.
 2. **Re-verify the proofs** on your own node:
-   `bip322 audit verify treasury-2026-01-08-931871-proofs.json`.
+   `bip322 audit verify treasury-2026-12-31-931871-proofs.json`.
    This checks every signature with every engine installed, that the
    block named in the message exists at that height with that time, and
-   that every output the file lists existed at that block.
+   that every output the file lists was held at that block: unspent now,
+   or spent after it by the transaction the file records.
 3. **Re-run any page.** Each UTXO page prints the commands with their
    output: `bip322 verifymessage <scriptPubKey> <proof> "<message>"` and
    `bip322 audit holdings <txid>:<vout> --at <block>`. Paste them as they
@@ -346,10 +372,11 @@ script interpreter as a second engine; bip322-report is not needed to verify).
    links to it on the explorer. For a second opinion on a
    proof, the reference checks in the bip322-core repository run other implementations beside the
    verifier.
-4. **Read section 4** for what a proof shows: that at the block named the
-   holder could produce a valid spend from the scriptPubKey, which is what
-   controlling the UTXOs locked to it means; not who owns the coins, not
-   what liabilities stand against them, nothing about any later time.
+4. **Read section 4** for what a proof shows: that after the block named,
+   the statement's closing block or a later one, the holder could produce
+   a valid spend from the scriptPubKey, which is what controlling the
+   UTXOs locked to it means; not who owns the coins, not what liabilities
+   stand against them, nothing about any later time.
 
 ## Privacy
 
@@ -367,8 +394,9 @@ there are no links unless `--explorer` is given.
 ## Known limitations
 
 * The node cross-check (`listunspent` against the closing UTXOs) runs only
-  when the period ends at the tip the history was read at and the node is
-  still at that block; otherwise the summary says it was not run, which is
+  while the closing UTXOs are the present ones: nothing of the wallet's
+  moved after the closing block, and the node is still at the block the
+  history was read at; otherwise the summary says it was not run, which is
   not a failure. A UTXO that an unconfirmed transaction spends is noted
   there as such, not as a mismatch.
 * Opening + net = closing shows that the statement adds up, not that the

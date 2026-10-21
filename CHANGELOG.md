@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.31.0 (2026-10-21)
+
+One block for the holdings and for the control. A closing UTXO is proven by
+a verified proof stamped at or after the statement's closing block; a proof
+from before it shows control at an earlier block and no longer counts (the
+UTXO's page says BEFORE THE CLOSING BLOCK, the JSON `timing: before`, and
+the summary names the snapshot to take: `to prove: bip322 audit snapshot -w
+treasury --at 931871`). Among several proofs the one at the closing block
+comes first, then the nearest after it. A period whose end lies ahead, or
+no period, closes on the last block before today 00:00 UTC, the night
+before, which bip322-audit 0.23's snapshot stamps by default, instead of
+the tip (`to_date` in the JSON, `(to date)` in the summary; the tip is
+reachable with `--to-height`). The node cross-check runs whenever nothing
+of the wallet's moved after the closing block, not only at the tip, and
+says why when it does not. The coverage block carries `closing_height`,
+`at_closing_count`, `before_count` and `missing_count`, and each uncovered
+UTXO its wallet and the block of its proof, if any; `covered_after_period_count`
+and `after_period` are gone. `last_block_before` and `parse_when` are
+bip322-audit's. Requires bip322-audit 0.23.
+
 ## 0.30.1 (2026-10-20)
 
 Review of 0.30.0. The listunspent cross-check is back: each loaded wallet's

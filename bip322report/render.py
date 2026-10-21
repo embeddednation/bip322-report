@@ -403,7 +403,7 @@ def _pages(report: dict) -> list[dict]:
     for o in sorted(report["closing"]["coins"], key=lambda c: rank.get(c.get("wallet"), len(rank))):
         a = groups[o["address"]]
         before = bool(a["proof"] and o["height"] is not None and int(a["proof"]["stamp"]["height"]) < o["height"])
-        pages.append({"n": len(pages) + 1, "o": o, "a": a, "before": before})
+        pages.append({"n": len(pages) + 1, "o": o, "a": a, "before": before, "timing": a["proof"]["timing"] if a["proof"] else None})
     return pages
 
 
@@ -419,7 +419,8 @@ def _proven(report: dict) -> str:
         return "No holdings at the end of the period: nothing to prove."
     n = cov["total_count"]
     utxos = "The closing UTXO" if n == 1 else f"All {n} closing UTXOs"
-    text = f"{utxos} {'has' if n == 1 else 'have'} a valid proof of control (section 3)"
+    when = "at the closing block" if cov["at_closing_count"] == n else "at or after the closing block"
+    text = f"{utxos} {'has' if n == 1 else 'have'} a valid proof of control dated {when} (section 3)"
     chain = report.get("onchain")
     if chain and not chain.get("not_run"):
         text += f", and {'it is' if n == 1 else 'each is'} on the chain at the block of {'its' if n == 1 else 'their'} proof"

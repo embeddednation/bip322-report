@@ -45,7 +45,7 @@ from .fiat import Rates
 from .history import History, fetch_history
 from .holder import merge_histories
 from .names import counterparts, name_by_wallets
-from .period import Period, block, last_block_before, parse_when, period_between, period_for_heights, period_for_year
+from .period import Period, block, last_block_before, parse_when, period_between, period_for_heights, period_for_year, start_of_today
 from .render import HEADINGS, PACKAGE_FONTS, THEMES, render_history_html, render_html, write_csv, write_pdf
 from .report import build_report, format_summary, previous_statement
 
@@ -185,10 +185,18 @@ def _period_given(args) -> bool:
 
 
 def _whole_life(cli: BitcoinCli, history: History) -> Period:
-    """From the block before the first transaction to the history's tip, labelled by the tip's date: the statement to date."""
+    """From the block before the first transaction to the last block before today 00:00 UTC, the night before, labelled by that
+    block's date: the statement to date, which closes on the block the default snapshot stamps."""
     first = min((tx.height for tx in history.txs if tx.height is not None), default=history.tip_height)
-    end = block(cli, history.tip_height)
-    return Period(end.iso_time[:10], block(cli, max(first - 1, 0)), end, None, None, True)
+    today = start_of_today()
+    end = last_block_before(cli, today, tip_height=history.tip_height)
+    start = block(cli, max(first - 1, 0))
+    if end.height <= start.height:
+        raise CLIError(
+            f"nothing to state before today: the first transaction is after block {end.height}, the last block before "
+            f"{today.strftime('%Y-%m-%d')} 00:00 UTC, which a statement to date closes on (--to-height for another block)"
+        )
+    return Period(end.iso_time[:10], start, end, None, today.strftime("%Y-%m-%dT%H:%M:%SZ"), True)
 
 
 def _period_label(args) -> str:
@@ -334,7 +342,7 @@ def _dust(args, config: Config, wallet: str | None, *, holder: str | None = None
 
 def _period(args, cli: BitcoinCli, history: History, period_label: str) -> Period:
     """The period's opening and closing blocks, resolved on the node; never beyond the history."""
-    # a period that runs to the tip closes on the history's own tip: a block that arrived since the history was read is not in it
+    # a period to date closes no higher than the history's own tip: a block that arrived since the history was read is not in it
     if args.year is not None:
         period = period_for_year(cli, args.year, tip_height=history.tip_height)
     elif args.from_when is not None:
@@ -466,7 +474,12 @@ def _write_statement(
 def _add_period_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--year", "-y", type=int, metavar="YEAR", help="the calendar year, UTC")
     p.add_argument("--from", dest="from_when", metavar="WHEN", help="start instant (YYYY-MM-DD or ISO 8601, UTC); with --to")
-    p.add_argument("--to", dest="to_when", metavar="WHEN", help="end instant, exclusive; in the future means up to the tip")
+    p.add_argument(
+        "--to",
+        dest="to_when",
+        metavar="WHEN",
+        help="end instant, exclusive; one that lies ahead means to date: the last block before today 00:00 UTC",
+    )
     p.add_argument("--from-height", type=int, metavar="H", help="opening block height; with --to-height")
     p.add_argument("--to-height", type=int, metavar="H", help="closing block height")
 
@@ -597,9 +610,11 @@ def build_parser() -> argparse.ArgumentParser:
             "One statement for a holder over every wallet under its directory: their histories merged, a move between two of them "
             "one transaction (sent by the one, received by the other, its fee the only cost), opening and closing holdings with each "
             "wallet's share, every movement between them, a reconciliation, and for each closing output the BIP-322 proof of control, "
-            "from the wallets' snapshots, that lists it, re-verified against the node now. The period is a calendar year, two instants, "
-            "or two heights; opening figures are as of the start block, closing figures as of the end block. Without a period the "
-            "statement runs from the block before the first transaction to the tip, labelled by the tip's date. "
+            "from the wallets' snapshots, stamped at or after the closing block, re-verified against the node now. The period is a "
+            "calendar year, two instants, or two heights; opening figures are as of the start block, closing figures as of the end "
+            "block. Without a period the statement runs from the block before the first transaction to the last block before today "
+            "00:00 UTC, the night before, labelled by that block's date; a period whose end lies ahead closes there too. That is the "
+            "block bip322 audit snapshot stamps by default, so a snapshot and a statement of the same day agree. "
             "HOLDER is a directory of the tree, and may be left out inside its directory, with holder = KEY in bip322.toml, or when "
             "the tree has one holder; [holders.KEY] in bip322.toml gives its name for the header. "
             "The files go to <holder>/statements/<label>/ in the data directory, named <holder>-<label>.pdf (.html where WeasyPrint is "
