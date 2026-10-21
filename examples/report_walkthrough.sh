@@ -59,10 +59,19 @@ req = [{"desc": json.loads(d)["descriptor"], "timestamp": "now", "range": [0, 50
 print(subprocess.run([*cli, "-rpcwallet=watch", "importdescriptors", json.dumps(req)], capture_output=True, text=True, check=True).stdout.strip())
 PY
 
-step "2. two deposits, confirmed"
+step "2. two deposits, confirmed; the exchange they came from keeps its own record of them, which the holder keeps as a ledger"
 A0=$(.venv/bin/bip322 -w "$WORK/wallet.desc" --network regtest deriveaddresses 0); A1=$(.venv/bin/bip322 -w "$WORK/wallet.desc" --network regtest deriveaddresses 2 --change)
-$CLI -rpcwallet=miner sendtoaddress "$A0" 0.5 >/dev/null; $CLI -rpcwallet=miner sendtoaddress "$A1" 0.1 >/dev/null
+TX1=$($CLI -rpcwallet=miner sendtoaddress "$A0" 0.5); TX2=$($CLI -rpcwallet=miner sendtoaddress "$A1" 0.1)
 $CLI -rpcwallet=miner generatetoaddress 2 "$MINE" >/dev/null
+mkdir -p "$BIP322_DIR/demo/exchange"   # in real life: a script of the holder's writes this from the exchange's API, keeping the raw answer beside it
+.venv/bin/python - "$BIP322_DIR/demo/exchange/ledger.json" "$TX1" "$TX2" "$A0" "$A1" <<'PY'
+import json, sys, time
+path, tx1, tx2, a0, a1 = sys.argv[1:]
+when = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 86400))
+entries = [{"kind": "withdrawal", "time_utc": when, "txid": tx1, "amount_sat": 50_000_000, "address": a0, "reference": "W-1"},
+           {"kind": "withdrawal", "time_utc": when, "txid": tx2, "amount_sat": 10_000_000, "address": a1, "reference": "W-2"}]
+json.dump({"ledger": 1, "currency": "EUR", "entries": entries}, open(path, "w"), indent=2)
+PY
 
 step "3. the owner proves everything once (the first snapshot in $WALLET, at the night before: here the tip)"
 $AUDIT init -w demo/watch          # bip322.toml in $BIP322_DIR: holder = "demo", wallet = "watch"; the tree is demo/watch/

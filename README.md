@@ -131,7 +131,9 @@ block, a line `node check (listunspent vs closing coins): ok` follows.
 
 `RESULT: ATTENTION` means the reconciliation failed, a closing UTXO has no
 valid proof at or after the closing block, a lookup on the chain contradicts
-the statement, or the node wallet disagrees with the closing UTXOs; the
+the statement, the node wallet disagrees with the closing UTXOs, or an
+account's own record (a `ledger.json` under the holder, see the handbook)
+has an entry no wallet saw or an amount the chain contradicts; the
 summary and the report say which, and for the proofs the summary names the
 snapshot to take (`to prove: bip322 audit snapshot -w treasury --at 931871`).
 `report` exits 0 when the result is OK, 1 when it is ATTENTION and 2 on an
@@ -247,6 +249,13 @@ without the split.
   bytes themselves. A coin that arrived after its proof (a change address
   proven before the spend) is marked so; the year-end snapshot gives it a
   proof at the closing block.
+* A custodial account's own record, `<holder>/<account>/ledger.json` in
+  the format the handbook gives, names the movements to and from that
+  account by txid, with the record's reference, and is checked against
+  the chain; an entry no wallet saw, or an amount that disagrees, fails
+  the check. The file is written by a script of the holder's from the
+  exchange's export or API, which stays beside it; the package knows the
+  format, no exchange.
 * `--dust SATS`: an output of at most SATS satoshi is dust when others
   paid it to the wallet in a transaction that spends nothing of the
   wallet's. Dust is left out of every figure, as if it had never been the

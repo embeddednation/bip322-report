@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.32.0 (2026-10-21)
+
+The accounts' own records. A custodial account's deposits and withdrawals,
+as `<holder>/<account>/ledger.json` in the ledger format (`bip322report.ledger`,
+documented in the handbook; written by a script of the holder's from the
+exchange's export or API answer, which stays beside it and is named in the
+file with its hash), name the movements to and from that account by txid,
+with the record's reference under the name, and are checked against the
+chain: an entry of the period no wallet saw, or an amount the chain
+contradicts, fails the new check "the accounts' own records agree with the
+movements" (`endpoints` in the JSON, `ledger NAME:` lines in the summary,
+the exceptions spelt out in section 1). The summary also counts the
+movements with no named far end (`unnamed_movements`). The record's name
+replaces an `[addresses]` name for the same transaction. The package knows
+the format, no exchange.
+
 ## 0.31.0 (2026-10-21)
 
 One block for the holdings and for the control. A closing UTXO is proven by

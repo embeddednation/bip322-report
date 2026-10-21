@@ -126,9 +126,10 @@ its addresses: a send by the addresses it paid, a receive by the addresses it
 came from, which the node reads from the block (Bitcoin Core 25 or later, no
 `txindex` needed). A wallet of the tree, the holder's own or another
 holder's, names its addresses itself: its node is asked which are its, so a
-move between two wallets needs no entry anywhere. `[addresses]` names the
-rest, an exchange's say. An address nothing names leaves the cell empty, to
-fill in by hand.
+move between two wallets needs no entry anywhere. A movement to or from an
+account the holder keeps a ledger for (below) is named by that account's own
+record. `[addresses]` names the rest, a payee's say. An address nothing names
+leaves the cell empty, and the summary counts such movements.
 
 ### The holder's statement
 
@@ -297,7 +298,62 @@ JSON with every figure, the CSV of movements, the reader's
 `company-2026-history.pdf`, and a copy of each proofs
 file the statement cites on a UTXO's page, under its own name. No other
 proofs file is copied or named. Never the snapshots: their PSBTs carry the
-wallet's xpubs.
+wallet's xpubs. The accounts' ledgers and the exchanges' raw answers stay
+too; the statement names them by hash, and they go on request.
+
+## The accounts' own records: the ledger file
+
+Coins come into the wallets from somewhere and leave for somewhere, and the
+far end of most movements is an account the holder keeps with an exchange.
+That account's own record of its deposits and withdrawals, the one a tax
+authority asks for, is what names those movements in the statement, not an
+address table. The holder keeps it in the tree, one directory per account:
+
+```
+  company/
+    bitstamp/                             # a custodial account, named as the holder likes
+      ledger.json                         # the account's deposits and withdrawals, in the ledger format
+      raw/                                # the exchange's own export or API answers, verbatim, named in ledger.json with their hashes
+```
+
+`ledger.json` is written by a short script of the holder's that asks the
+exchange's API or reads its export, keeps the answer verbatim under `raw/`,
+and translates it into the format below; the script knows the exchange, the
+public packages know only the format. An entry is seen from the account's
+side: a `withdrawal` left the account for a wallet, which received it; a
+`deposit` arrived at the account from a wallet, which sent it. `amount_sat`
+is what the chain moved, `fee_sat` the account's own fee when the record has
+it, `address` the wallet's for a withdrawal and the account's for a deposit,
+`reference` the record's own id. `currency`, `source` and the three last
+fields may be left out; other keys are kept and not read.
+
+```json
+{
+  "ledger": 1,
+  "currency": "EUR",
+  "source": {"name": "raw/crypto-transactions-2027-01-08.json", "sha256": "…"},
+  "entries": [
+    {"kind": "withdrawal", "time_utc": "2026-03-02T14:05:11Z", "txid": "…", "amount_sat": 10000000,
+     "fee_sat": 5000, "address": "bc1q…", "reference": "W-12345"},
+    {"kind": "deposit", "time_utc": "2026-06-10T09:00:00Z", "txid": "…", "amount_sat": 20000000,
+     "address": "bc1q…", "reference": "D-67"}
+  ]
+}
+```
+
+The statement matches each entry's txid against the wallets' transactions. A
+movement the record matches is named after the account, with the record's
+reference under the name, and its amount is checked against the chain. Two
+things fail the check "the accounts' own records agree with the movements":
+an entry dated in the period that no wallet of the statement saw (coins the
+account sent somewhere else, or received from somewhere else), and an amount
+that disagrees with the chain. Both are spelt out in section 1. The summary
+also counts the movements that have no named far end at all, which is where
+an auditor looks next; it is not a failed check, since a payee the holder has
+not named is the books' business. The ledger files and the raw answers stay
+with the holder, like the histories; the statement carries the account's
+name, the references and the source's hash, and the auditor asks for the raw
+export when they want it, as they would for a bank.
 
 ## During the year, for the holder
 

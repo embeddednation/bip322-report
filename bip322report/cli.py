@@ -44,6 +44,7 @@ from .coverage import pending_snapshots, proofs_names
 from .fiat import Rates
 from .history import History, fetch_history
 from .holder import merge_histories
+from .ledger import LedgerError, find_ledgers
 from .names import counterparts, name_by_wallets
 from .period import Period, block, last_block_before, parse_when, period_between, period_for_heights, period_for_year, start_of_today
 from .render import HEADINGS, PACKAGE_FONTS, THEMES, render_history_html, render_html, write_csv, write_pdf
@@ -395,6 +396,12 @@ def cmd_report(args) -> int:
                 f"note: {', '.join(stray)} in [wallets.{w}] is not read by the statement, which is the holder's: set it in [holders.{key}]"
             )
     period_label = _period_label(args) if _period_given(args) else None
+    try:
+        ledgers = find_ledgers(holder_dir(key))  # the holder's custodial accounts' records: a broken one is refused, never ignored
+    except LedgerError as exc:
+        raise CLIError(str(exc)) from exc
+    for ledger in ledgers:
+        _progress(f"{ledger.account}: ledger of {len(ledger.entries)} entries")
     dust = _dust(args, config, None, holder=key)
     rates = _rates(args)
     theme = _theme(args, config, None, holder=key)
@@ -434,6 +441,7 @@ def cmd_report(args) -> int:
         wallets=members,
         sources=sources,
         node_clis=node_clis,
+        ledgers=ledgers,
     )
     report["previous"] = previous_statement(holder_statements_dir(key), report)
     return _write_statement(args, config, key, report, directory, f"{key}-{period.label}", roots, history.chain, theme, pdf)

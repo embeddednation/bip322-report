@@ -21,6 +21,7 @@ from . import TOOL
 from .coverage import cover_coins, load_proofs_files, pending_snapshots
 from .fiat import Rates
 from .history import Coin, History, WalletTx
+from .ledger import Ledger, match_ledgers
 from .period import Period
 
 
@@ -45,8 +46,13 @@ def build_report(
     sources: dict[str, dict] | None = None,
     node_check: bool = True,
     node_clis: Mapping[str, BitcoinCli] | None = None,
+    ledgers: Sequence[Ledger] | None = None,
 ) -> dict:
     """The report as a plain dict (what report.json holds and the templates render).
+
+    ``ledgers`` are the holder's custodial accounts' own records (:mod:`bip322report.ledger`): a movement whose txid an
+    account recorded is named after the account, with the record's reference, and its amount is checked against the
+    record; an entry of the period no wallet saw, or an amount that disagrees, fails the ``endpoints`` check.
 
     ``addresses`` is ``[addresses]`` of ``bip322.toml``: the wallet each address of
     someone else belongs to, which names the other side of a movement (``counterpart``).
@@ -94,7 +100,9 @@ def build_report(
     scripts = {a["address"]: a["script"]["script_pubkey"] for a in closing_addresses}
     onchain_result = _onchain(cli, closing_rows, period, scripts, progress) if cli is not None and onchain and closing_rows else None
     order = _wallet_order(history, wallets) if wallets is not None else None
-    tx_rows, totals = _movement_rows(movements, opening_sat, rates, addresses or {}, label, holder=wallets is not None)
+    endpoints = match_ledgers(list(ledgers), history, period) if ledgers else None
+    by_txid = endpoints["by_txid"] if endpoints else {}
+    tx_rows, totals = _movement_rows(movements, opening_sat, rates, addresses or {}, label, holder=wallets is not None, endpoints=by_txid)
     net_sat = totals["net_sat"]
 
     report = {
@@ -139,6 +147,8 @@ def build_report(
         "policy": _single({f.document.get("policy") for f in files if f.path in used} - {None}),
         "pending_snapshots": [p.name for p in pending_snapshots(proofs_roots, {c.address for c in closing})],
         "pending_transactions": [tx.to_dict() for tx in history.pending],
+        "endpoints": {k: v for k, v in endpoints.items() if k != "by_txid"} if endpoints else None,
+        "unnamed_movements": sum(1 for r in tx_rows if r["kind"] in ("receive", "send", "mixed", "swept") and not r["counterpart"]),
         "onchain": onchain_result,
         "fiat": (
             {
@@ -158,7 +168,7 @@ def build_report(
         ),
     }
     report["wallets"] = (
-        [_wallet_block(w, opening, closing, movements, rates, addresses or {}, (sources or {}).get(w)) for w in order]
+        [_wallet_block(w, opening, closing, movements, rates, addresses or {}, (sources or {}).get(w), by_txid) for w in order]
         if order is not None
         else None
     )
@@ -248,6 +258,7 @@ def _wallet_block(
     rates: Rates | None,
     names: dict[str, str],
     source: dict | None,
+    endpoints: Mapping[str, dict] | None = None,
 ) -> dict:
     """One wallet of a holder: its opening and closing balance, what it received and sent (from and to others, and from and
     to the holder's other wallets: ``moved_in`` and ``moved_out`` say how much of each), paid in fees and netted in joint
@@ -255,7 +266,7 @@ def _wallet_block(
     Opening + received - sent - fees + mixed = closing, for each wallet."""
     o = sum(c.amount_sat for c in opening if c.wallet == wallet)
     s = sum(c.amount_sat for c in closing if c.wallet == wallet)
-    rows, sums = _wallet_rows(movements, wallet, o, rates, names)
+    rows, sums = _wallet_rows(movements, wallet, o, rates, names, endpoints or {})
     block = {"name": wallet, "opening_sat": o, "opening_btc": btc(o)}
     sums["amount"] = sums["received"] - sums["sent"] + sums["mixed"]
     for key, sat in sums.items():
@@ -325,7 +336,12 @@ def _wallet_share(tx: WalletTx, wallet: str, got: int, net: int) -> tuple[int, i
 
 
 def _wallet_rows(
-    movements: list[WalletTx], wallet: str, opening_sat: int, rates: Rates | None, names: dict[str, str]
+    movements: list[WalletTx],
+    wallet: str,
+    opening_sat: int,
+    rates: Rates | None,
+    names: dict[str, str],
+    endpoints: Mapping[str, dict] | None = None,
 ) -> tuple[list[dict], dict[str, int]]:
     """A holder's movements as one of its wallets sees them: the wallet's net (fee inside), a running balance of its own, and
     the other side plain: another wallet of the holder's, or what ``[addresses]`` names.  A move between two of the holder's
@@ -346,6 +362,9 @@ def _wallet_rows(
         for key, sat in share.items():
             sums[key] += sat
         kind, counterpart = _wallet_side(tx, wallet, any(c.wallet == wallet for c in tx.ours_in), net, names)
+        endpoint = (endpoints or {}).get(tx.txid)
+        if endpoint and kind in ("receive", "send", "mixed"):
+            counterpart = _by_record(counterpart, endpoint["account"], kind)
         row = {
             "txid": tx.txid,
             "height": tx.height,
@@ -361,6 +380,7 @@ def _wallet_rows(
             "balance_after_sat": running,
             "balance_after_btc": btc(running),
             "counterpart": counterpart,
+            "endpoint": endpoint,
         }
         if rates:
             rate = rates.rate_on(tx.time)
@@ -433,8 +453,21 @@ def _counterpart(tx: WalletTx, names: dict[str, str], own: str) -> str:
     return ", ".join(found)
 
 
+def _by_record(counterpart: str, account: str, kind: str) -> str:
+    """The other side of a movement an account's record matches: the account, which is authoritative for its own
+    transactions; a joint transaction keeps whoever else is named beside it."""
+    others = [n for n in counterpart.split(", ") if n and n != account] if kind == "mixed" else []
+    return ", ".join([account, *others])
+
+
 def _movement_rows(
-    movements: list[WalletTx], opening_sat: int, rates: Rates | None, names: dict[str, str], own: str, holder: bool = False
+    movements: list[WalletTx],
+    opening_sat: int,
+    rates: Rates | None,
+    names: dict[str, str],
+    own: str,
+    holder: bool = False,
+    endpoints: Mapping[str, dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """The period's transactions as rows with a running balance and the other side named, and the totals of the period:
     received from others, sent to others, fees, the net of joint transactions, each in fiat too when rates were given
@@ -454,6 +487,9 @@ def _movement_rows(
             row["wallet"], row["counterpart"] = _sides(tx, names)
         else:
             row["counterpart"] = _counterpart(tx, names, own)
+        row["endpoint"] = (endpoints or {}).get(tx.txid)
+        if row["endpoint"] and tx.kind in ("receive", "send", "mixed"):
+            row["counterpart"] = _by_record(row["counterpart"], row["endpoint"]["account"], tx.kind)
         # what moved between the wallet and others, before the fee: received, or (sent).  A mixed transaction's fee is
         # unknown (others funded it too), so its amount is the wallet's net and no fee is stated for it.
         amount = tx.net_sat + (tx.fee_sat or 0)
@@ -565,7 +601,8 @@ def _verdict(report: dict) -> bool:
     node, chain = report["node_check"], report["onchain"]
     node_ok = node is None or node.get("ok") is not False  # None: could not be checked, not a failure
     chain_ok = chain is None or chain["contradicted"] == 0  # a lookup that could not run excuses none that did
-    return bool(report["reconciliation"]["ok"] and report["coverage"]["complete"] and node_ok and chain_ok)
+    ends_ok = report.get("endpoints") is None or report["endpoints"]["ok"]  # the accounts' records agree with the movements
+    return bool(report["reconciliation"]["ok"] and report["coverage"]["complete"] and node_ok and chain_ok and ends_ok)
 
 
 WIDTH = 84  # characters per printed command line: fits an A4 page in the statement's monospace size, and a mainnet block line
@@ -961,6 +998,10 @@ def previous_statement(archive: Path | None, report: dict) -> dict | None:
     }
 
 
+def _entry_text(e: dict) -> str:
+    return f"{e['kind']} {e['amount_btc']} BTC {e['time_utc'][:10]}" + (f" ({e['reference']})" if e.get("reference") else "")
+
+
 def format_summary(report: dict) -> str:
     """The terse text summary printed on stderr."""
     p, r, c = report["period"], report["reconciliation"], report["coverage"]
@@ -1009,6 +1050,17 @@ def format_summary(report: dict) -> str:
         lines.append(f"  other proofs files, not used: {report['proofs_files_not_used']}")
     if report["pending_snapshots"]:
         lines.append("  awaiting signatures: " + ", ".join(report["pending_snapshots"]))
+    for a in (report.get("endpoints") or {}).get("accounts", []):
+        line = f"  ledger {a['name']}: {a['matched']}/{a['in_period']} entries of the period matched"
+        if a["unmatched"]:
+            line += f"; UNMATCHED {len(a['unmatched'])}: " + "; ".join(_entry_text(e) + " seen by no wallet" for e in a["unmatched"])
+        if a["mismatched"]:
+            line += f"; MISMATCH {len(a['mismatched'])}: " + "; ".join(
+                f"{_entry_text(e)}, the chain {e['chain_btc']} BTC" for e in a["mismatched"]
+            )
+        lines.append(line)
+    if report.get("unnamed_movements"):
+        lines.append(f"  movements without a named far end: {report['unnamed_movements']}")
     oc = report.get("onchain")
     if oc:
         lines.append(

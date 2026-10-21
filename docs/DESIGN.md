@@ -73,8 +73,23 @@ deliberately does not do. The proofs themselves are bip322-audit's business
   names the spending transaction when the history knows it), is shown on
   its page and is not a failure. A lookup that could not run is shown as not run and
   excuses none that did.
+* **Endpoints.** The far end of a movement is named by the account's own
+  record when the holder keeps one: `<holder>/<account>/ledger.json`, in
+  the one format `bip322report.ledger` documents, translated by a script
+  of the holder's from the exchange's export or API answer, which is kept
+  verbatim beside it and named in the file with its hash. The match is by
+  txid, the only key both sides share; the record is authoritative for its
+  own transactions, so its name replaces whatever `[addresses]` said. The
+  check is two-sided: a movement the record matches must carry the record's
+  amount on the chain (what the wallets received of a withdrawal, what they
+  paid the account's address of a deposit), and an entry dated in the period
+  must be a transaction some wallet saw, else the account sent coins to, or
+  took them from, somewhere the statement does not cover. The package knows
+  the format and no exchange: that knowledge is the holder's, as the signing
+  devices are.
 * **The verdict.** `RESULT: OK` (exit status 0) when the reconciliation holds,
-  every closing coin is covered, no lookup contradicts the statement, and
+  every closing coin is covered, no lookup contradicts the statement, the
+  accounts' records agree with the movements, and
   the node cross-check either agrees or was not run; otherwise
   `RESULT: ATTENTION` (exit status 1). Each page names its proof's block,
   and the summary says how many proofs are at the closing block itself.
