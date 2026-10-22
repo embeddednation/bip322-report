@@ -57,7 +57,9 @@ def build_report(
     ``addresses`` is ``[addresses]`` of ``bip322.toml``: the wallet each address of
     someone else belongs to, which names the other side of a movement (``counterpart``).
     ``wallets`` names a holder's wallets when ``history`` is their merged one
-    (``holder.merge_histories``): each movement then names the wallet of the
+    (``holder.merge_histories``); one with no movement in the period and
+    nothing held at either end is listed under ``idle_wallets`` and left out
+    of ``wallets``, unless every wallet is so.  Each movement then names the wallet of the
     holder's it touched (``wallet``) beside the other side (``counterpart``),
     and the report carries each wallet's opening and closing balance, what it
     received and sent (a move between the holder's wallets is sent by one and
@@ -167,11 +169,16 @@ def build_report(
             else None
         ),
     }
-    report["wallets"] = (
+    blocks = (
         [_wallet_block(w, opening, closing, movements, rates, addresses or {}, (sources or {}).get(w), by_txid) for w in order]
         if order is not None
         else None
     )
+    # a wallet with nothing in the period, no movement and nothing held at either end, is named in the notes and shown nowhere
+    # else, so long as some wallet of the holder's has something; with nothing anywhere, every wallet stays, there is nothing to hide
+    idle = [b["name"] for b in blocks or [] if not b["transactions"] and not b["opening_sat"] and not b["closing_sat"]]
+    report["idle_wallets"] = idle if blocks and len(idle) < len(blocks) else []
+    report["wallets"] = [b for b in blocks if b["name"] not in report["idle_wallets"]] if blocks is not None else None
     report["wallets_totals"] = _wallets_totals(report["wallets"]) if report["wallets"] else None
     report["previous"] = None  # the statement before this one, when the tree has it (previous_statement); not a fact of this one
     report["report_id"] = _report_id(report)
@@ -1039,6 +1046,8 @@ def format_summary(report: dict) -> str:
         )
     if report.get("wallets"):
         lines.append("wallets: " + ", ".join(f"{w['name']} {w['closing_btc']} BTC" for w in report["wallets"]))
+    if report.get("idle_wallets"):
+        lines.append("  nothing in the period: " + ", ".join(report["idle_wallets"]))
     d = report.get("dust") or {}
     if d.get("count"):
         lines.append(f"dust: {d['count']} outputs of at most {d['threshold_sat']} sat, {d['total_btc']} BTC, left out of every figure")

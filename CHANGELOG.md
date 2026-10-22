@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.34.0 (2026-10-22)
+
+A wallet of the holder's with nothing in the period, no movement and
+nothing held at either end, is named in the notes and in the summary
+(`idle_wallets` in the JSON) and shown nowhere else: no share rows, no block
+in section 1, no CSV block. When every wallet is so, every wallet stays.
+
 ## 0.33.0 (2026-10-22)
 
 The statement asks for its proofs. `bip322 report … --prove` takes, for every

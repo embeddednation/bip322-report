@@ -14,7 +14,7 @@ import bip322report.cli as cli_module
 from bip322report.history import History, fetch_history
 from bip322report.holder import merge_histories
 from bip322report.period import period_for_heights
-from bip322report.render import render_html, write_csv
+from bip322report.render import render_history_html, render_html, write_csv
 from bip322report.report import build_report, format_summary
 
 OTHER = "bc1qexternal0000000000000000000000000000000ext"
@@ -366,3 +366,33 @@ def test_the_statement_is_the_holders(wallet, tmp_path, monkeypatch, capsys):
     assert (
         cli_module.main(["report", "company"]) == 2 and "wallet treasury is under two holders, company and jonas" in capsys.readouterr().err
     )
+
+
+def test_a_wallet_with_nothing_in_the_period_is_named_in_the_notes_and_shown_nowhere_else(wallet):
+    """A legacy wallet, emptied long ago: in a later period it has no movement and holds nothing, so it leaves the page."""
+    from test_report import EXTERNAL
+
+    a0, a1 = wallet.derive(0).address, wallet.derive(1).address
+    live, old = FakeNode(tip=1012, wallet_name="live"), FakeNode(tip=1012, wallet_name="old")
+    live.mine.add(a0)
+    live.add("aa" * 32, 1005, [(EXTERNAL, 0)], [(a0, 50_000_000)])
+    old.mine.add(a1)
+    old.add("bb" * 32, 900, [(EXTERNAL, 1)], [(a1, 10_000_000)])
+    old.add("cc" * 32, 950, [("bb" * 32, 0)], [(EXTERNAL, 9_990_000)])  # emptied at 950
+    histories = {"live": fetch_history(live), "old": fetch_history(old)}
+    report = build_report(merge_histories(histories), period_for_heights(live, 1000, 1012), label="H", wallets=["live", "old"])
+    assert report["idle_wallets"] == ["old"] and [w["name"] for w in report["wallets"]] == ["live"]
+    html = render_html(report)
+    assert "1 more wallet with nothing in the period, no movement and nothing held (old)" in html
+    assert "Holder H, wallet live" in html and "1.1 live" not in html  # one wallet on the page: no split, no numbered blocks
+    assert "  nothing in the period: old" in format_summary(report) and "wallets: live 0.50000000 BTC" in format_summary(report)
+    import re
+
+    reader = render_history_html(report).split("</head>")[1]
+    assert not re.search(r"\bold\b", reader) and "<h2>" not in reader  # the reader's document: one wallet, no sections
+    # the period in which the old wallet lived and the live one did not yet: the other way round
+    earlier = build_report(merge_histories(histories), period_for_heights(live, 890, 1000), label="H", wallets=["live", "old"])
+    assert earlier["idle_wallets"] == ["live"] and [w["name"] for w in earlier["wallets"]] == ["old"]
+    # nothing anywhere: every wallet stays, there is nothing to hide
+    empty = build_report(merge_histories(histories), period_for_heights(live, 960, 1000), label="H", wallets=["live", "old"])
+    assert empty["idle_wallets"] == [] and len(empty["wallets"]) == 2

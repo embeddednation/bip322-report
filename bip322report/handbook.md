@@ -175,7 +175,9 @@ wallet's share under the opening holdings and above the closing ones, and the
 movements are one block per wallet, a move between two of them sent by the
 one and received by the other under the same transaction for the same
 amount, the fee with the sender. A holder of one wallet gets the same
-document without the split. The opening line cites the statement
+document without the split, and so does a holder whose other wallets had
+nothing in the period, no movement and nothing held at either end: those are
+named in the notes and shown nowhere else. The opening line cites the statement
 in the tree that closed at this one's opening block, by label and reference,
 so the statements chain. Without a period the statement runs from the block
 before the first transaction to the last block before today 00:00 UTC, the
