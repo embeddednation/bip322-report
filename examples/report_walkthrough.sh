@@ -30,14 +30,17 @@ run() { printf '$ %s\n' "$*" >&2; "$@"; }
 cleanup() { $CLI stop >/dev/null 2>&1 || true; sleep 1; rm -rf "$DATADIR"; }
 trap cleanup EXIT
 
-sign_snapshot() {  # cosigners A and C sign every PSBT of a snapshot (hardware signers in real life), then finalize it
+sign() {  # cosigners A and C sign every PSBT of a snapshot (hardware signers in real life)
   local S=$1
   for P in "$S"/to_sign/*.psbt; do
     N=$(basename "$P" .psbt)
     $DEV signpsbt "$P" "$WORK/cosigner-A.json" -o "$S/signed/$N-A-part.psbt"
     $DEV signpsbt "$P" "$WORK/cosigner-C.json" -o "$S/signed/$N-C-part.psbt"
   done
-  run $AUDIT --cli "$CLI" -w watch finalize "$(basename "$S")"
+}
+sign_snapshot() {  # sign, then finalize by hand (the statement finalizes the snapshots it asked for itself)
+  sign "$1"
+  run $AUDIT --cli "$CLI" -w watch finalize "$(basename "$1")"
 }
 
 step "0. a private regtest node with a wallet"
@@ -74,14 +77,14 @@ json.dump({"ledger": 1, "currency": "EUR", "entries": entries}, open(path, "w"),
 PY
 
 step "3. the owner proves everything once (the first snapshot in $WALLET, at the night before: here the tip)"
-$AUDIT init -w demo/watch          # bip322.toml in $BIP322_DIR: holder = "demo", wallet = "watch"; the tree is demo/watch/
-sign_snapshot "$(run $AUDIT --cli "$CLI" -w watch snapshot --text "Proof of control {date}")"
+$AUDIT init -w demo/watch          # bip322.toml in $BIP322_DIR (holder = "demo") and the wallet directory demo/watch/
+sign_snapshot "$(run $AUDIT --cli "$CLI" -w watch snapshot)"   # the message: Proof of control, demo, <date>
 
 step "4. a payment is prepared; before broadcasting, the change address is proven (a snapshot joins the others)"
 CHANGE=$(.venv/bin/bip322 -w "$WORK/wallet.desc" --network regtest deriveaddresses 5 --change)
 FUNDED=$($CLI -rpcwallet=watch walletcreatefundedpsbt '[]' "[{\"$MINE\":0.2}]" 0 "{\"subtractFeeFromOutputs\":[0],\"changeAddress\":\"$CHANGE\"}" | .venv/bin/python -c "import json,sys;print(json.load(sys.stdin)['psbt'])")
 $CLI decodepsbt "$FUNDED" | .venv/bin/python -c "import json,sys;[print('output', o['value'], o['scriptPubKey']['address']) for o in json.load(sys.stdin)['tx']['vout']]"
-sign_snapshot "$(run $AUDIT --cli "$CLI" -w watch prove "$CHANGE" --text "Proof of control {date}")"
+sign_snapshot "$(run $AUDIT --cli "$CLI" -w watch prove "$CHANGE")"
 
 step "5. the proof of the change address is valid: broadcast"
 PRIV=$(.venv/bin/python - "$WORK" <<'PY'
@@ -100,11 +103,11 @@ $CLI sendrawtransaction "$SIGNED" >/dev/null; $CLI -rpcwallet=miner generatetoad
 echo "mid-year, nothing is left to prove: the change address already is"
 $AUDIT --cli "$CLI" -w watch snapshot --skip-proven 2>&1 | tail -1 || true
 
-step "6. year end: one full snapshot at the closing block (in real life --before 2027-01-01, the last block of 2026; here the night before, the block the statement of the current year closes on too)"
-sign_snapshot "$(run $AUDIT --cli "$CLI" -w watch snapshot --text "Proof of control {date}")"
+step "6. year end: the statement asks for the snapshots it lacks, at its closing block (the night before here; the last block of the year in real life), and writes nothing yet"
+for S in $(run $REPORT --cli "$CLI" --year "$(date -u +%Y)" --prove); do sign "$S"; done
 ls "$WALLET"
 
-step "7. the year's statement of the holder, demo, over its one wallet: opening and closing balances, movements, every closing coin backed by a proof at the closing block (the PDF when WeasyPrint is installed)"
+step "7. signed: the statement finalizes them, then writes the year's statement of the holder, demo, over its one wallet: opening and closing balances, movements, every closing coin backed by a proof at the closing block (the PDF when WeasyPrint is installed)"
 run $REPORT --cli "$CLI" --year "$(date -u +%Y)"
 ls "$STATEMENTS/$(date -u +%Y)"
 
@@ -119,8 +122,8 @@ echo "the statement now closes on that block: the proofs are from before it and 
 STATUS=0; run $REPORT --cli "$CLI" --year "$(date -u +%Y)" -o "$WORK/report-stale" || STATUS=$?
 [ "$STATUS" -eq 1 ] || { echo "expected exit status 1 (ATTENTION), got $STATUS" >&2; exit 1; }
 
-step "10. the snapshot at the closing block again, signed; with --dust 1000 the dust is left out of every figure, counted in a note and listed in the JSON: RESULT: OK"
-sign_snapshot "$(run $AUDIT --cli "$CLI" -w watch snapshot --text "Proof of control {date}")"
+step "10. --prove again, signed; with --dust 1000 the dust is left out of every figure, counted in a note and listed in the JSON: RESULT: OK"
+for S in $(run $REPORT --cli "$CLI" --year "$(date -u +%Y)" --prove -o "$WORK/report-dust"); do sign "$S"; done
 run $REPORT --cli "$CLI" --year "$(date -u +%Y)" --dust 1000 -o "$WORK/report-dust"
 
 step "done - artifacts in $WORK (the statements under $STATEMENTS)"

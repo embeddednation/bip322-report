@@ -73,7 +73,8 @@ bip322 audit finalize                 # the newest snapshot; valid -> broadcast
 bip322 audit snapshot --skip-proven
 
 # the year's statement of the holder, over every wallet under company/
-bip322 report --year 2026             # or: bip322 report company --year 2026
+bip322 report --year 2026 --prove     # the snapshots the statement lacks, at its closing block; sign them, then:
+bip322 report --year 2026             # finalizes what has been signed, then the statement (or: bip322 report company --year 2026)
 #   -> company/statements/2026/: company-2026.pdf (or .html), .json, .csv, the proofs files it cites,
 #      and company-2026-history.pdf: the movements for a reader, no proofs, no txids
 
@@ -249,6 +250,14 @@ without the split.
   bytes themselves. A coin that arrived after its proof (a change address
   proven before the spend) is marked so; the year-end snapshot gives it a
   proof at the closing block.
+* `--prove` takes the snapshots the statement lacks: for every wallet whose
+  closing UTXOs have no proof at or after the closing block, the full
+  snapshot at that block through `bip322 audit snapshot -w WALLET --at
+  HEIGHT`, the directories printed, no statement written. A rerun first
+  finalizes every snapshot at the closing block whose `signed/` holds PSBTs
+  and which has no proofs file yet. A directory under the holder is a
+  wallet from the moment it exists, so the statement knows its wallets
+  before any proof is taken.
 * A custodial account's own record, `<holder>/<account>/ledger.json` in
   the format the handbook gives, names the movements to and from that
   account by txid, with the record's reference, and is checked against

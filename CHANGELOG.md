@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.33.0 (2026-10-22)
+
+The statement asks for its proofs. `bip322 report … --prove` takes, for every
+wallet whose closing UTXOs have no proof at or after the closing block, the
+full snapshot at that block (`bip322 audit snapshot -w WALLET --at HEIGHT`,
+run in the same process), prints the directories and writes no statement; a
+wallet with such a snapshot awaiting signatures is named and left alone, one
+the node has not loaded is refused with the reason. A rerun first finalizes
+every snapshot at the closing block whose `signed/` holds PSBTs and which
+has no proofs file yet (`bip322 audit finalize`), then builds the statement.
+With bip322-audit 0.24 a directory under a holder is a wallet from the
+moment it exists, so the first run can be a statement over wallets with no
+proof yet, and the signed message is the holder's name and the date. The
+key `wallet` of `bip322.toml` is no longer read by `history` and `balance`
+either. Requires bip322-audit 0.24.
+
 ## 0.32.0 (2026-10-21)
 
 The accounts' own records. A custodial account's deposits and withdrawals,

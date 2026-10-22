@@ -76,13 +76,16 @@ else; the holder's holds its wallets and its statements:
 ```
 
 Directories are named for their place, so the names stay bare; files that
-leave the tree carry wallet (or holder), time and kind in their name. A
-wallet's name is unique in the tree, so `-w NAME` finds it under whichever
-holder it is. A second wallet is a second directory, created by its first
-snapshot: under the holder `-w KEY/NAME` names, else the holder whose
-directory the command runs in, else `holder` in `bip322.toml`, else the
-tree's one holder. The statement takes the holder the same way, from the
-word after the options, the directory, the file, or the tree.
+leave the tree carry wallet (or holder), time and kind in their name. The
+tree is the declaration: a directory under a holder is a wallet from the
+moment it exists, so `bip322 init -w company/treasury` makes the first and
+`mkdir company/cold` adds another, and the statement knows the holder's
+wallets before any proof is taken. A wallet's name is unique in the tree, so
+`-w NAME` finds it under whichever holder it is; a wallet the audit commands
+make themselves goes under the holder `-w KEY/NAME` names, else the holder
+whose directory the command runs in, else `holder` in `bip322.toml`, else
+the tree's one holder. The statement takes the holder the same way, from
+the word after the options, the directory, the file, or the tree.
 The snapshots hold the PSBTs, which carry the wallet's xpubs: they stay with
 the holder, and are backed up like the wallet's own records. The statements
 are what leaves. Versions before bip322-audit 0.22 kept a wallet's snapshots
@@ -96,13 +99,10 @@ In `bip322.toml`, top-level keys are defaults for every wallet, a
 
 ```toml
 holder = "company"                  # the default holder: a new -w NAME is made in its directory
-wallet = "treasury"                 # the default -w
-text = "Proof of control {date}"    # the message template
 dust = 1000                         # satoshi; see --dust
 
 [holders.company]
-name = "Company AB"                 # the statements' header (default: the key)
-text = "Proof of control, Company AB (556123-4567), {date}"   # for the holder's wallets
+name = "Company AB (556123-4567)"   # the statements' header, and the signed message: Proof of control, Company AB (556123-4567), <date>
 
 [wallets.treasury]
 node = "treasury-2of3-main"         # the node wallet, when its name is not the directory's
@@ -112,15 +112,23 @@ node = "treasury-2of3-main"         # the node wallet, when its name is not the 
 ```
 
 `bip322 init -w company/treasury` writes the file with every key shown, all
-but `holder`, `wallet` and their tables as comments to switch on.
+but `holder` and the two tables as comments to switch on, and makes the
+directories `company/treasury/`.
+
+The holder's `name` is one string used twice: the statement's header, and
+the message every proof signs, `Proof of control, <name>, <date>` over the
+stamp line, so that what is stated and what is signed cannot drift apart.
+It must be printable ASCII for the signing devices; `bip322 audit snapshot
+--text` gives one snapshot another message. The keys `wallet` and `text` of
+earlier versions are no longer read, and a file that still has them is told.
 
 Other keys: `cli` (how to reach the node), `timeout`, `theme`, `heading`,
 `explorer`. The statement's own settings, `dust`, `theme`, `heading` and
 `explorer`, are read from `[holders.KEY]` and the top level, not from a
-wallet's table, which carries what is read per wallet (`node`, `cli`, `text`);
-the statement says so when it finds one there. For `history` and `balance`,
-without `-w` and outside a wallet's directory, `wallet` in the file names the
-wallet, else the node's one loaded wallet is it.
+wallet's table, which carries what is read per wallet (`node`, `cli`); the
+statement says so when it finds one there. `history` and `balance` take the
+wallet from `-w`, else the wallet directory they run in, else the node's one
+loaded wallet.
 The other side of a movement, the statement's `wallet` column, is named by
 its addresses: a send by the addresses it paid, a receive by the addresses it
 came from, which the node reads from the block (Bitcoin Core 25 or later, no
@@ -133,12 +141,27 @@ leaves the cell empty, and the summary counts such movements.
 
 ### The holder's statement
 
-The statement is the holder's, over every wallet under its directory:
+The statement is the holder's, over every wallet under its directory, and
+it asks for the proofs it lacks:
 
 ```sh
-bip322 report --year 2026             # -> company/statements/2026/: company-2026.pdf (or .html), .json, .csv, -history.pdf
+bip322 report --year 2026             # the statement, or ATTENTION naming what is unproven
+bip322 report --year 2026 --prove     # the snapshots the statement lacks, at its closing block, one per wallet; no statement yet
+# sign to_sign/*.psbt of each into its signed/
+bip322 report --year 2026             # finalizes what has been signed, then -> company/statements/2026/: company-2026.pdf, .json, .csv, -history.pdf
 bip322 report company                 # to date: -> company/statements/2026-10-20/, closing on the night before
 ```
+
+The first run is for looking: which wallets, which movements, what is
+proven and what is not. `--prove` takes, for every wallet whose closing
+UTXOs have no proof at or after the closing block, the full snapshot at that
+block, through `bip322 audit snapshot -w WALLET --at HEIGHT`, and prints the
+directories; a wallet with such a snapshot awaiting signatures is left
+alone and named, and one the node has not loaded is refused with that
+reason. The rerun finalizes every snapshot at the closing block whose
+`signed/` holds PSBTs and which has no proofs file yet, as `bip322 audit
+finalize` would, then builds the statement. The date is given once; the
+block is never typed.
 
 A holder is a directory of the tree, and its wallets are the wallet
 directories under it; `[holders.KEY]` in `bip322.toml` gives the name the
@@ -215,16 +238,18 @@ through `bitcoin-cli`; `--cli "bitcoin-cli -signet"` or `cli` in
 Once the year is over, whenever suits:
 
 ```sh
-bip322 audit snapshot --before 2027-01-01   # -> company/treasury/2026-12-31-931871/
+bip322 report --year 2026 --prove     # -> company/treasury/2026-12-31-931871/, and the same for every other wallet of the holder's
 ```
 
 The stamp is the last block of 2026, the block the statement of 2026 closes
-on, and the snapshot lists the wallet's coins at that block, what it has
+on, and each snapshot lists the wallet's coins at that block, what it has
 spent since included (from the node wallet's own history), with one
-`to_sign` PSBT per address. This is a **full** snapshot, not `--skip-proven`:
-the statement wants, for every closing UTXO, a proof dated at the closing
-block or after it, change proven earlier in the year included. A proof from
-earlier in the year shows control then, not at the year's end.
+`to_sign` PSBT per address and the message `Proof of control, <the holder's
+name>, 2026-12-31`. This is a **full** snapshot: the statement wants, for
+every closing UTXO, a proof dated at the closing block or after it, change
+proven earlier in the year included; a proof from earlier in the year shows
+control then, not at the year's end. The same snapshot by hand is
+`bip322 audit snapshot -w treasury --before 2027-01-01`.
 
 ### Signing on the devices
 
@@ -245,10 +270,12 @@ files).
 ### Finalize, verify, report
 
 ```sh
-bip322 audit finalize                 # the newest snapshot: combines, self-verifies, writes the proofs file
-bip322 audit verify                   # what the auditor will run; should end in OK
-bip322 report --year 2026             # -> company/statements/2026/
+bip322 report --year 2026             # finalizes the signed snapshots at the closing block, then -> company/statements/2026/
+bip322 audit verify -w treasury       # what the auditor will run on the proofs file; should end in OK
 ```
+
+`bip322 audit finalize -w treasury` does the finalizing by hand, for a
+snapshot the statement is not about.
 
 The audit commands take the wallet from `-w`, else from the wallet directory
 they run in, else from `bip322.toml`, else from the node; `finalize` and
@@ -382,19 +409,17 @@ which takes a snapshot over the funded addresses no earlier snapshot of the
 wallet proves, and exits non-zero saying so when there are none (in a
 script, treat that as "nothing to do").
 
-**A statement at any time.** Take the snapshot and the statement on the same
-day: both close on the last block before today 00:00 UTC, the night before.
+**A statement at any time.** The same three runs, with no period for a
+statement to date, which closes on the last block before today 00:00 UTC:
 
 ```sh
-bip322 audit snapshot                 # the wallet's coins at the night before
-# sign, then bip322 audit finalize
-bip322 report                         # to date: closes on the same block
+bip322 report --prove                 # the snapshots at the night before
+# sign
+bip322 report                         # finalizes them, then the statement to date
 ```
 
-For a period, give both the same instant: `bip322 audit snapshot --before
-2026-07-01` and `bip322 report --from 2026-01-01 --to 2026-07-01` close on
-the same block. The year-end statement is the same document with the
-year-end snapshot.
+For a period, `--from 2026-01-01 --to 2026-07-01` on both runs. The year-end
+statement is the same document with the year-end snapshots.
 
 ## The auditor's procedure
 

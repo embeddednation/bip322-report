@@ -29,6 +29,7 @@ EXTERNAL2 = "bc1qexternal1111111111111111111111111111111ext"
 def _node(wallet, tip=1000) -> FakeNode:
     """Coins arriving at heights 980-993, a spend and an internal move after 1000, a pending and a conflicted tx."""
     node = FakeNode(tip=tip)
+    node.descriptor = wallet.to_descriptor()
     a0, a1, a2, a3 = wallet.derive(0).address, wallet.derive(0, 1).address, wallet.derive(1, 1).address, wallet.derive(1).address
     node.mine |= {a0, a1, a2, a3}
     node.add("aa" * 32, 990, [(EXTERNAL, 0)], [(a0, 50_000_000)])

@@ -27,6 +27,7 @@ class FakeNode(BitcoinCli):
         super().__init__(["bitcoin-cli", f"-rpcwallet={wallet_name}"])
         self.tip_height = tip
         self.wallet_name = wallet_name
+        self.descriptor: str | None = None  # the wallet's descriptor, for listdescriptors (bip322 audit snapshot reads it)
         self.mine: set[str] = set()
         self.txs: dict[str, dict] = {}  # txid -> {height|None, conflicted, vin: [(txid, vout)], vout: [(address, sat)]}
         self.order: list[str] = []
@@ -103,6 +104,19 @@ class FakeNode(BitcoinCli):
             return {"subversion": "/Satoshi:31.1.0/"}
         if method == "getwalletinfo":
             return {"walletname": self.wallet_name}
+        if method == "listdescriptors":  # the wallet behind the node wallet, when a test gave the node its descriptor
+            if not self.descriptor:
+                raise RpcError("Wallet file not specified")
+            from embit.descriptor.checksum import add_checksum
+
+            base = self.descriptor.split("#")[0]
+            return {
+                "wallet_name": self.wallet_name,
+                "descriptors": [
+                    {"desc": add_checksum(base.replace("/<0;1>/*", "/0/*")), "active": True, "internal": False, "range": [0, 999]},
+                    {"desc": add_checksum(base.replace("/<0;1>/*", "/1/*")), "active": True, "internal": True, "range": [0, 999]},
+                ],
+            }
         if method == "getblockhash":
             h = int(params[0])
             if not 0 <= h <= self.tip_height:

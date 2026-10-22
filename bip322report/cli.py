@@ -12,13 +12,17 @@ in ``bip322.toml``, else the tree's one.  ``-w`` names a wallet for ``history`` 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import sys
 from pathlib import Path
 
+import bip322audit.cli as audit_cli
 from bip322audit.audit import AuditError
 from bip322audit.datadir import (
     HISTORY_FILE,
+    SNAPSHOT_FILE,
     Config,
     ConfigError,
     find_data_dir,
@@ -27,6 +31,7 @@ from bip322audit.datadir import (
     holder_statements_dir,
     holders,
     name_wallet,
+    proofs_file_in,
     use_data_dir,
     wallet_dirs,
     wallet_of_cwd,
@@ -62,15 +67,73 @@ def _opt(args, name: str):
 
 
 def _wallet_name(args, config: Config) -> str | None:
-    """The wallet as named by the owner: ``-w``, else the wallet directory the command runs in, else ``wallet`` in bip322.toml; None when none says."""
+    """The wallet as named by the owner: ``-w``, else the wallet directory the command runs in; None when neither says."""
     given = _opt(args, "wallet")
     if given:
         return name_wallet(str(given))
-    here = wallet_of_cwd()
-    if here is not None:
-        return here
-    named = config.get("wallet")
-    return str(named) if named is not None else None
+    return wallet_of_cwd()
+
+
+def _snapshots_at(path: Path, height: int) -> list[tuple[Path, bool, bool]]:
+    """The wallet's snapshot directories stamped at this block, each with whether its ``signed/`` holds files and whether it is finalized."""
+    found = []
+    for d in sorted(p for p in path.iterdir() if p.is_dir() and (p / SNAPSHOT_FILE).is_file()):
+        try:
+            stamp = int(json.loads((d / SNAPSHOT_FILE).read_text())["stamp"]["height"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if stamp != height:
+            continue
+        signed = (d / "signed").is_dir() and any(p.is_file() for p in (d / "signed").iterdir())
+        found.append((d, signed, proofs_file_in(d) is not None))
+    return found
+
+
+def _audit(args, argv: list[str]) -> tuple[int, str]:
+    """``bip322 audit ARGV`` in this process, on the node the statement uses (``--cli`` passed on; the tree is the same): its exit
+    status and what it printed on stdout (the directory or file it made), its stderr being ours."""
+    cli = _opt(args, "cli")
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = audit_cli.main((["--cli", str(cli)] if cli else []) + argv)
+    return code, out.getvalue().strip()
+
+
+def _finalize_signed(args, paths: dict[str, Path], loaded: list[str], height: int) -> None:
+    """Before the statement is built: a snapshot at the closing block whose ``signed/`` holds files and which has no proofs file
+    yet is finalized, as ``bip322 audit finalize`` would; one that cannot be is reported and left, and the statement says what it lacks."""
+    for w in loaded:
+        for d, signed, done in _snapshots_at(paths[w], height):
+            if done or not signed:
+                continue
+            _progress(f"{w}: finalizing {d.name}, signed and not yet finalized")
+            code, written = _audit(args, ["-w", w, "finalize", str(d)])
+            _progress(f"{w}: {written}" if code == 0 else f"{w}: {d.name} could not be finalized; the statement goes on without it")
+
+
+def _prove(args, report: dict, paths: dict[str, Path], sources: dict[str, dict]) -> int:
+    """``--prove``: for every wallet whose closing UTXOs lack a proof at or after the closing block, the full snapshot at that
+    block, as ``bip322 audit snapshot -w WALLET --at HEIGHT``; the directories on stdout, what to do next on stderr, no statement."""
+    height = report["coverage"]["closing_height"]
+    wanting = sorted({u["wallet"] for u in report["coverage"]["uncovered"] if u.get("wallet")})
+    taken = []
+    for w in wanting:
+        pending = [d for d, signed, done in _snapshots_at(paths[w], height) if not done]
+        if pending:
+            _progress(f"{w}: {pending[0].name} awaits signatures (sign its to_sign/*.psbt into its signed/)")
+            continue
+        if sources[w]["source"] != "node":
+            _progress(f"{w}: not loaded on the node (read from its kept history): load it to take its snapshot")
+            continue
+        _progress(f"{w}: taking the snapshot at block {height}")
+        code, directory = _audit(args, ["-w", w, "snapshot", "--at", str(height)])
+        if code != 0:
+            raise CLIError(f"{w}: the snapshot at block {height} could not be taken")
+        taken.append(directory)
+    for directory in taken:
+        print(directory)
+    _progress("sign to_sign/*.psbt of each into its signed/, then run the statement again: it finalizes what is signed")
+    return 1
 
 
 def _cli(args, config: Config, wallet: str | None, *, rpcwallet: bool = True) -> BitcoinCli:
@@ -386,7 +449,7 @@ def cmd_report(args) -> int:
     members = sorted(paths)
     if not members:
         raise CLIError(
-            f"no wallet under {holder_dir(key)} yet: the first snapshot of a wallet under it makes it"
+            f"no wallet under {holder_dir(key)}: a directory there is one (bip322 init -w KEY/NAME makes the first, mkdir another)"
             + (f" (holders here: {', '.join(found)})" if found else "")
         )
     for w in members:
@@ -407,7 +470,9 @@ def cmd_report(args) -> int:
     theme = _theme(args, config, None, holder=key)
     pdf = not args.html and _pdf_possible()
     roots = _proofs_roots(args, [paths[w] for w in members])  # a given path is checked before any work
-    if args.output:
+    if args.prove:
+        pass  # a run that may write no statement does not refuse over a directory in use; the check comes before the writing
+    elif args.output:
         _check_directory(Path(args.output), args.force)
     elif period_label:
         _check_directory(holder_statements_dir(key) / period_label, args.force)  # the default directory is known before the long read
@@ -424,9 +489,9 @@ def cmd_report(args) -> int:
     node_clis = {w: _cli(args, config, w) for w in loaded}  # each loaded wallet's node wallet: the listunspent check is per wallet
     cli = node_clis[loaded[0]] if loaded else _cli(args, config, members[0], rpcwallet=False)  # any one node for the chain-level work
     period = _period(args, cli, history, period_label) if period_label else _whole_life(cli, history)
+    _finalize_signed(args, paths, loaded, period.end.height)  # what has been signed at the closing block becomes a proofs file first
     names = _names(args, config, history, period, members)
     directory = Path(args.output) if args.output else holder_statements_dir(key) / period.label
-    _check_directory(directory, args.force)
     report = build_report(
         history,
         period,
@@ -444,6 +509,10 @@ def cmd_report(args) -> int:
         ledgers=ledgers,
     )
     report["previous"] = previous_statement(holder_statements_dir(key), report)
+    if args.prove and not report["coverage"]["complete"]:
+        print(format_summary(report), file=sys.stderr)
+        return _prove(args, report, paths, sources)
+    _check_directory(directory, args.force)
     return _write_statement(args, config, key, report, directory, f"{key}-{period.label}", roots, history.chain, theme, pdf)
 
 
@@ -620,7 +689,9 @@ def build_parser() -> argparse.ArgumentParser:
             "wallet's share, every movement between them, a reconciliation, and for each closing output the BIP-322 proof of control, "
             "from the wallets' snapshots, stamped at or after the closing block, re-verified against the node now. The period is a "
             "calendar year, two instants, or two heights; opening figures are as of the start block, closing figures as of the end "
-            "block. Without a period the statement runs from the block before the first transaction to the last block before today "
+            "block. A snapshot at the closing block whose signed/ holds PSBTs and which has no proofs file yet is finalized first; "
+            "--prove takes the snapshots the statement lacks. Without a period the statement runs from the block before the first "
+            "transaction to the last block before today "
             "00:00 UTC, the night before, labelled by that block's date; a period whose end lies ahead closes there too. That is the "
             "block bip322 audit snapshot stamps by default, so a snapshot and a statement of the same day agree. "
             "HOLDER is a directory of the tree, and may be left out inside its directory, with holder = KEY in bip322.toml, or when "
@@ -646,11 +717,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="take the proofs from here instead of the wallets' directories: a directory of snapshots, one snapshot, or one proofs file; may repeat",
     )
+    p.add_argument(
+        "--prove",
+        action="store_true",
+        help="take the snapshots the statement lacks instead of writing it: for every wallet whose closing UTXOs have no proof at "
+        "or after the closing block, the full snapshot at that block (bip322 audit snapshot -w WALLET --at HEIGHT), its directory "
+        "printed; sign the PSBTs, then run the statement again, which finalizes what has been signed",
+    )
     _add_statement_args(p, "under HOLDER/statements/")
     p.set_defaults(
         func=cmd_report,
         examples=[
-            "--year 2026",
+            "--year 2026 --prove        # the snapshots the statement of 2026 lacks, at its closing block",
+            "--year 2026                # after signing: finalizes the signed snapshots, then the statement",
             "company --year 2026 --dust 1000",
             "company --from 2026-01-01 --to 2026-07-01 --rates sek.csv --currency SEK",
             "company -o source-of-funds",

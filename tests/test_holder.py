@@ -361,7 +361,7 @@ def test_the_statement_is_the_holders(wallet, tmp_path, monkeypatch, capsys):
         in capsys.readouterr().err
     )
     assert cli_module.main(["report", "nobody", "-o", str(tmp_path / "nobody")]) == 2
-    assert f"no wallet under {root / 'nobody'} yet" in capsys.readouterr().err
+    assert f"no wallet under {root / 'nobody'}: a directory there is one" in capsys.readouterr().err
     _wallet_dir(root / "jonas" / "treasury")  # the same wallet name under two holders
     assert (
         cli_module.main(["report", "company"]) == 2 and "wallet treasury is under two holders, company and jonas" in capsys.readouterr().err

@@ -73,6 +73,15 @@ deliberately does not do. The proofs themselves are bip322-audit's business
   names the spending transaction when the history knows it), is shown on
   its page and is not a failure. A lookup that could not run is shown as not run and
   excuses none that did.
+* **The statement asks for its proofs.** It knows the holder's wallets (the
+  directories under the holder, from the moment they exist), its closing
+  block, and which closing UTXOs lack a proof at or after it, so `--prove`
+  takes the missing snapshots itself, through bip322-audit's own command,
+  one full snapshot per wallet at the closing block, and writes no statement
+  until they are signed; the rerun finalizes what has been signed, again
+  through bip322-audit, then builds the statement. The audit commands stay
+  usable alone; the statement only calls them, and the holder types the
+  period once and never a height.
 * **Endpoints.** The far end of a movement is named by the account's own
   record when the holder keeps one: `<holder>/<account>/ledger.json`, in
   the one format `bip322report.ledger` documents, translated by a script
