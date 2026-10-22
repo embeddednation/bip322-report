@@ -94,6 +94,8 @@ def build_report(
     dust = history.dust_at(dust_sat, period.end.height)
     created = {tx.txid: tx.iso_time for tx in history.txs}  # when each coin was received: the time of its creating transaction's block
     history = history.without_dust(dust_sat).written_off(list(written_off))
+    # written off by the closing block: still in the node wallet's listunspent, no longer a holding; left out of the node check as dust is
+    lost = [tx.ours_in[0] for tx in history.txs if tx.kind == "written_off" and tx.height is not None and tx.height <= period.end.height]
     opening = history.coins_at(period.start.height)
     closing = history.coins_at(period.end.height)
     movements = history.between(period.start.height, period.end.height)
@@ -178,9 +180,9 @@ def build_report(
             else None
         ),
         "node_check": (
-            _node_checks(node_clis, history, period, closing, dust)
+            _node_checks(node_clis, history, period, closing, dust + lost)
             if node_clis is not None  # a holder: per loaded wallet; none loaded means no check, not the chain-level node's
-            else _node_check(cli, history, period, closing, dust)
+            else _node_check(cli, history, period, closing, dust + lost)
             if cli is not None and node_check
             else None
         ),
@@ -406,6 +408,7 @@ def _wallet_rows(
             "balance_after_btc": btc(running),
             "counterpart": counterpart,
             "endpoint": endpoint,
+            "reason": tx.reason,
         }
         if rates:
             rate = rates.rate_on(tx.time)
@@ -426,6 +429,8 @@ def _wallet_side(tx: WalletTx, wallet: str, spent: bool, net: int, names: dict[s
     theirs = _named(names, [c.address for c in tx.others_out if c.address])
     if tx.kind == "swept":
         return "swept", ", ".join(_named(names, tx.payers))
+    if tx.kind == "written_off":
+        return "written_off", ""  # a loss, not a payment: no other side
     if not spent:  # paid by another wallet of the holder's, or by others
         return "receive", ", ".join(sorted({c.wallet for c in tx.ours_in if c.wallet}) if tx.ours_in else _named(names, tx.payers))
     if tx.mixed:
@@ -949,7 +954,7 @@ def _node_checks(clis: Mapping[str, BitcoinCli], history: History, period: Perio
 def _node_check(
     cli: BitcoinCli, history: History, period: Period, closing: list[Coin], dust: list[Coin] = (), *, wallet: str | None = None
 ) -> dict | None:
-    """The node's listunspent must agree with the closing coins (``dust`` left out on both sides).
+    """The node's listunspent must agree with the closing coins (``dust``, and coins written off, left out on both sides).
 
     listunspent tells the present only, so the check counts only while the
     closing coins are the present ones: no transaction of the wallet's (of

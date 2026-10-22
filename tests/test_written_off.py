@@ -83,6 +83,15 @@ def test_the_statement_reads_the_write_offs_from_the_config(wallet, run, monkeyp
     written = json.loads(next(p for p in Path("w").iterdir() if p.name.endswith(".json")).read_text())
     assert written["written_off"][0]["height"] == 1008 and written["closing"]["total_sat"] == 38_900_000
     assert written["wallets"][0]["written_off_sat"] == 25_000_000
+    row = next(
+        t for t in written["wallets"][0]["transactions"] if t["height"] == 1008
+    )  # the wallet's own block, section 1: the write-off row
+    assert row["kind"] == "written_off" and row["reason"] == "keys lost" and row["counterpart"] == "" and row["amount_sat"] == -25_000_000
+    assert written["node_check"]["ok"] and written["node_check"]["missing_from_report"] == []  # the node still has the coin; left out
+    assert (
+        "Written off, keys lost"
+        in next(p for p in Path("w").iterdir() if p.name.endswith(".html") and "-history" not in p.name).read_text()
+    )
     (root / "bip322.toml").write_text('holder = "h"\n[written_off]\n"nonsense" = { date = "2023-11-21", reason = "x" }\n')
     assert run(node, "report", "--from-height", "979", "--to-height", "1012", "-o", "x")[0] == 2
     (root / "bip322.toml").write_text(f'holder = "h"\n[written_off]\n"{"bb" * 32}:0" = {{ date = "2099-01-01", reason = "x" }}\n')

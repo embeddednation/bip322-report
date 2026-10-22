@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.35.1 (2026-10-22)
+
+A holder's statement said "Internal move" for a write-off in the wallet's
+own block of section 1, and the node check counted the written-off coin,
+which the node wallet still lists, as missing from the statement. The row
+now says "Written off, reason" everywhere, and a coin written off by the
+closing block is left out of the node check as dust is.
+
 ## 0.35.0 (2026-10-22)
 
 Write-offs. `[written_off]` in `bip322.toml` (`"TXID:VOUT" = { date =
