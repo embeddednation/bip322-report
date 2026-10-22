@@ -18,10 +18,10 @@ from bip322core.report import describe_address, format_verify_text
 from bip322core.verify import verify_message
 
 from . import TOOL
+from .accounts import Account, match_accounts
 from .coverage import cover_coins, load_proofs_files, pending_snapshots
 from .fiat import Rates
 from .history import Coin, History, WalletTx, WriteOff
-from .ledger import Ledger, match_ledgers
 from .period import Period
 
 
@@ -46,7 +46,7 @@ def build_report(
     sources: dict[str, dict] | None = None,
     node_check: bool = True,
     node_clis: Mapping[str, BitcoinCli] | None = None,
-    ledgers: Sequence[Ledger] | None = None,
+    accounts: Sequence[Account] | None = None,
     written_off: Sequence[WriteOff] = (),
 ) -> dict:
     """The report as a plain dict (what report.json holds and the templates render).
@@ -55,7 +55,7 @@ def build_report(
     by a row of kind ``written_off``, is held no more from then on and needs no proof; the period that holds the row lists it
     under ``written_off`` and in the summary.
 
-    ``ledgers`` are the holder's custodial accounts' own records (:mod:`bip322report.ledger`): a movement whose txid an
+    ``accounts`` are the holder's custodial accounts' own records (:mod:`bip322report.accounts`): a movement whose txid an
     account recorded is named after the account, with the record's reference, and its amount is checked against the
     record; an entry of the period no wallet saw, or an amount that disagrees, fails the ``endpoints`` check.
 
@@ -109,7 +109,7 @@ def build_report(
     scripts = {a["address"]: a["script"]["script_pubkey"] for a in closing_addresses}
     onchain_result = _onchain(cli, closing_rows, period, scripts, progress) if cli is not None and onchain and closing_rows else None
     order = _wallet_order(history, wallets) if wallets is not None else None
-    endpoints = match_ledgers(list(ledgers), history, period) if ledgers else None
+    endpoints = match_accounts(list(accounts), history, period) if accounts else None
     by_txid = endpoints["by_txid"] if endpoints else {}
     tx_rows, totals = _movement_rows(movements, opening_sat, rates, addresses or {}, label, holder=wallets is not None, endpoints=by_txid)
     net_sat = totals["net_sat"]
@@ -1097,7 +1097,7 @@ def format_summary(report: dict) -> str:
     if report["pending_snapshots"]:
         lines.append("  awaiting signatures: " + ", ".join(report["pending_snapshots"]))
     for a in (report.get("endpoints") or {}).get("accounts", []):
-        line = f"  ledger {a['name']}: {a['matched']}/{a['in_period']} entries of the period matched"
+        line = f"  account {a['name']}: {a['matched']}/{a['in_period']} entries of the period matched"
         if a["unmatched"]:
             line += f"; UNMATCHED {len(a['unmatched'])}: " + "; ".join(_entry_text(e) + " seen by no wallet" for e in a["unmatched"])
         if a["mismatched"]:

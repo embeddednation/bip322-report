@@ -1,8 +1,8 @@
-"""A custodial account's own record of what crossed into and out of the holder's wallets: the ledger file.
+"""A custodial account's own record of what crossed into and out of the holder's wallets: the movements file.
 
-``<holder>/<account>/ledger.json``, one per account the holder keeps coins with (an
-exchange, say), written by a short script of the holder's from the account's export or
-API answer, which is kept beside it as the source and named in the file with its hash.
+``<holder>/<account>/movements.json``, one per account the holder keeps coins with (an
+exchange, say), written by a tool of the holder's from the account's export or API
+answer, which is kept beside it as the source and named in the file with its hash.
 The statement reads it: each entry's txid is matched against the wallets' transactions,
 which names the other side of a movement by the account's own record and checks the
 amount against the chain.  An entry no wallet saw, and an amount that disagrees, are
@@ -12,9 +12,9 @@ as the holder chose, and bip322-report reads the format and nothing else.
 The format, version 1::
 
     {
-      "ledger": 1,
+      "movements": 1,
       "currency": "EUR",
-      "source": {"name": "crypto-transactions 2027-01-08.json", "sha256": "..."},
+      "source": {"name": "raw/crypto-transactions-2027-01-08.json", "sha256": "..."},
       "entries": [
         {"kind": "withdrawal", "time_utc": "2026-03-02T14:05:11Z", "txid": "...",
          "amount_sat": 10000000, "fee_sat": 5000, "address": "bc1q...", "reference": "W-12345"},
@@ -39,21 +39,21 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from bip322audit.datadir import ACCOUNT_FILE
 from bip322audit.rpc import btc
 
 from .history import History, WalletTx
 from .period import Period
 
-__all__ = ["KINDS", "LEDGER_FILE", "LEDGER_VERSION", "Entry", "Ledger", "LedgerError", "find_ledgers", "match_ledgers"]
+__all__ = ["ACCOUNT_FILE", "FORMAT_VERSION", "KINDS", "Account", "AccountError", "Entry", "find_accounts", "match_accounts"]
 
-LEDGER_FILE = "ledger.json"
-LEDGER_VERSION = 1
+FORMAT_VERSION = 1
 KINDS = ("deposit", "withdrawal")
 _HEX = set("0123456789abcdef")
 
 
-class LedgerError(ValueError):
-    """A ledger file that is not one: the path and what is wrong with it."""
+class AccountError(ValueError):
+    """A movements file that is not one: the path and what is wrong with it."""
 
 
 @dataclass(frozen=True)
@@ -84,37 +84,37 @@ class Entry:
 
 
 @dataclass
-class Ledger:
-    account: str  # the directory's name: what the holder calls the account
+class Account:
+    name: str  # the directory's name: what the holder calls the account
     path: Path
     entries: list[Entry] = field(default_factory=list)
     currency: str | None = None
     source: dict | None = None  # {"name", "sha256"}: the export or API answer the entries were translated from
 
     @classmethod
-    def load(cls, path: Path, account: str) -> Ledger:
-        """The ledger file read and checked; :class:`LedgerError` names the first thing wrong with it."""
+    def load(cls, path: Path, name: str) -> Account:
+        """The movements file read and checked; :class:`AccountError` names the first thing wrong with it."""
         try:
             data = json.loads(path.read_text())
         except (OSError, ValueError) as exc:
-            raise LedgerError(f"{path}: cannot be read as JSON ({exc})") from exc
-        if not isinstance(data, dict) or data.get("ledger") != LEDGER_VERSION:
-            raise LedgerError(f'{path}: not a ledger file of version {LEDGER_VERSION} ("ledger": {LEDGER_VERSION})')
+            raise AccountError(f"{path}: cannot be read as JSON ({exc})") from exc
+        if not isinstance(data, dict) or data.get("movements") != FORMAT_VERSION:
+            raise AccountError(f'{path}: not a movements file of version {FORMAT_VERSION} ("movements": {FORMAT_VERSION})')
         rows = data.get("entries")
         if not isinstance(rows, list):
-            raise LedgerError(f"{path}: 'entries' is missing or not a list")
+            raise AccountError(f"{path}: 'entries' is missing or not a list")
         entries = [_entry(path, n, row) for n, row in enumerate(rows, 1)]
         currency = data.get("currency")
         source = data.get("source")
         if currency is not None and not isinstance(currency, str):
-            raise LedgerError(f"{path}: 'currency' is not a string")
+            raise AccountError(f"{path}: 'currency' is not a string")
         if source is not None and (not isinstance(source, dict) or not isinstance(source.get("name"), str)):
-            raise LedgerError(f"{path}: 'source' is not an object with a 'name'")
-        return cls(account, path, entries, currency, source)
+            raise AccountError(f"{path}: 'source' is not an object with a 'name'")
+        return cls(name, path, entries, currency, source)
 
     def to_dict(self) -> dict:
         return {
-            "name": self.account,
+            "name": self.name,
             "file": str(self.path.name),
             "currency": self.currency,
             "source": self.source,
@@ -125,57 +125,57 @@ class Ledger:
 def _entry(path: Path, n: int, row) -> Entry:
     where = f"{path}: entry {n}"
     if not isinstance(row, dict):
-        raise LedgerError(f"{where} is not an object")
+        raise AccountError(f"{where} is not an object")
     kind = row.get("kind")
     if kind not in KINDS:
-        raise LedgerError(f"{where}: 'kind' must be one of {', '.join(KINDS)}, not {kind!r}")
+        raise AccountError(f"{where}: 'kind' must be one of {', '.join(KINDS)}, not {kind!r}")
     txid = row.get("txid")
     if not isinstance(txid, str) or len(txid) != 64 or set(txid.lower()) - _HEX:
-        raise LedgerError(f"{where}: 'txid' is not a transaction id (64 hex characters)")
+        raise AccountError(f"{where}: 'txid' is not a transaction id (64 hex characters)")
     amount = row.get("amount_sat")
     if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
-        raise LedgerError(f"{where}: 'amount_sat' is not a whole number of satoshi")
+        raise AccountError(f"{where}: 'amount_sat' is not a whole number of satoshi")
     fee = row.get("fee_sat")
     if fee is not None and (not isinstance(fee, int) or isinstance(fee, bool) or fee < 0):
-        raise LedgerError(f"{where}: 'fee_sat' is not a whole number of satoshi")
+        raise AccountError(f"{where}: 'fee_sat' is not a whole number of satoshi")
     when = row.get("time_utc")
     try:
         datetime.fromisoformat(str(when).replace("Z", "+00:00"))
     except ValueError as exc:
-        raise LedgerError(f"{where}: 'time_utc' is not an ISO 8601 instant ({when!r})") from exc
+        raise AccountError(f"{where}: 'time_utc' is not an ISO 8601 instant ({when!r})") from exc
     for key in ("address", "reference"):
         if row.get(key) is not None and not isinstance(row[key], str):
-            raise LedgerError(f"{where}: '{key}' is not a string")
+            raise AccountError(f"{where}: '{key}' is not a string")
     return Entry(kind, str(when), txid.lower(), amount, fee, row.get("address"), row.get("reference"))
 
 
-def find_ledgers(holder: Path) -> list[Ledger]:
-    """The ledgers under a holder's directory, by account name: every ``<holder>/<account>/ledger.json``."""
+def find_accounts(holder: Path) -> list[Account]:
+    """The accounts under a holder's directory, by name: every ``<holder>/<account>/movements.json``."""
     if not holder.is_dir():
         return []
     found = []
     for child in sorted(holder.iterdir()):
-        if child.name.startswith(".") or child.name == "statements" or not (child / LEDGER_FILE).is_file():
+        if child.name.startswith(".") or child.name == "statements" or not (child / ACCOUNT_FILE).is_file():
             continue
-        found.append(Ledger.load(child / LEDGER_FILE, child.name))
+        found.append(Account.load(child / ACCOUNT_FILE, child.name))
     return found
 
 
-def match_ledgers(ledgers: list[Ledger], history: History, period: Period) -> dict:
-    """Each ledger's entries against the wallets' transactions, for the statement.
+def match_accounts(accounts: list[Account], history: History, period: Period) -> dict:
+    """Each account's entries against the wallets' transactions, for the statement.
 
     Returns ``by_txid``, what a matched transaction's other side is by the account's record (account, kind from the
-    account's side, reference, amount, fee); ``accounts``, per ledger the entries in the period, how many a wallet
+    account's side, reference, amount, fee); ``accounts``, per account the entries in the period, how many a wallet
     transaction matches, the ``unmatched`` (dated in the period, seen by no wallet: coins that went somewhere else, or
     came from somewhere else) and the ``mismatched`` (a movement of the period whose amount on the chain is not the
     record's); and ``ok``, true when nothing is unmatched or mismatched.
     """
     txs: dict[str, WalletTx] = {tx.txid: tx for tx in [*history.txs, *history.pending]}
     by_txid: dict[str, dict] = {}
-    accounts = []
-    for ledger in ledgers:
+    rows = []
+    for account in accounts:
         groups: dict[str, list[Entry]] = {}
-        for e in ledger.entries:
+        for e in account.entries:
             groups.setdefault(e.txid, []).append(e)
         in_period = matched = 0
         unmatched: list[dict] = []
@@ -192,9 +192,9 @@ def match_ledgers(ledgers: list[Ledger], history: History, period: Period) -> di
                 in_period += len(group)
                 matched += len(group)
                 mismatched.extend(_disagreements(tx, group))
-            by_txid[txid] = _endpoint(ledger.account, group)
-        accounts.append({**ledger.to_dict(), "in_period": in_period, "matched": matched, "unmatched": unmatched, "mismatched": mismatched})
-    return {"by_txid": by_txid, "accounts": accounts, "ok": all(not a["unmatched"] and not a["mismatched"] for a in accounts)}
+            by_txid[txid] = _endpoint(account.name, group)
+        rows.append({**account.to_dict(), "in_period": in_period, "matched": matched, "unmatched": unmatched, "mismatched": mismatched})
+    return {"by_txid": by_txid, "accounts": rows, "ok": all(not a["unmatched"] and not a["mismatched"] for a in rows)}
 
 
 def _disagreements(tx: WalletTx, group: list[Entry]) -> list[dict]:

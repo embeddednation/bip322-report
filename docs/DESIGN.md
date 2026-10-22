@@ -94,8 +94,8 @@ deliberately does not do. The proofs themselves are bip322-audit's business
   usable alone; the statement only calls them, and the holder types the
   period once and never a height.
 * **Endpoints.** The far end of a movement is named by the account's own
-  record when the holder keeps one: `<holder>/<account>/ledger.json`, in
-  the one format `bip322report.ledger` documents, translated by a script
+  record when the holder keeps one: `<holder>/<account>/movements.json`, in
+  the one format `bip322report.accounts` documents, translated by a tool
   of the holder's from the exchange's export or API answer, which is kept
   verbatim beside it and named in the file with its hash. The match is by
   txid, the only key both sides share; the record is authoritative for its

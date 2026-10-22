@@ -133,7 +133,7 @@ block, a line `node check (listunspent vs closing coins): ok` follows.
 `RESULT: ATTENTION` means the reconciliation failed, a closing UTXO has no
 valid proof at or after the closing block, a lookup on the chain contradicts
 the statement, the node wallet disagrees with the closing UTXOs, or an
-account's own record (a `ledger.json` under the holder, see the handbook)
+account's own record (a `movements.json` under the holder, see the handbook)
 has an entry no wallet saw or an amount the chain contradicts; the
 summary and the report say which, and for the proofs the summary names the
 snapshot to take (`to prove: bip322 audit snapshot -w treasury --at 931871`).
@@ -258,7 +258,7 @@ without the split.
   and which has no proofs file yet. A directory under the holder is a
   wallet from the moment it exists, so the statement knows its wallets
   before any proof is taken.
-* A custodial account's own record, `<holder>/<account>/ledger.json` in
+* A custodial account's own record, `<holder>/<account>/movements.json` in
   the format the handbook gives, names the movements to and from that
   account by txid, with the record's reference, and is checked against
   the chain; an entry no wallet saw, or an amount that disagrees, fails

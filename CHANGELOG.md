@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.36.0 (2026-10-22)
+
+The account's record is `movements.json`, where 0.32 to 0.35 read
+`ledger.json`: a ledger is the book of accounts, not one account's record,
+and the word names a signing-device vendor besides. The file's marker is
+`"movements": 1`; `bip322report.accounts` (`Account`, `AccountError`,
+`find_accounts`, `match_accounts`, `FORMAT_VERSION`) replaces
+`bip322report.ledger`, `build_report` takes `accounts`, and the summary says
+`account NAME:`. Requires bip322-audit 0.25.
+
 ## 0.35.2 (2026-10-22)
 
 Section 1 flows. A wallet's movements were kept whole on one page where

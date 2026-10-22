@@ -135,7 +135,7 @@ came from, which the node reads from the block (Bitcoin Core 25 or later, no
 `txindex` needed). A wallet of the tree, the holder's own or another
 holder's, names its addresses itself: its node is asked which are its, so a
 move between two wallets needs no entry anywhere. A movement to or from an
-account the holder keeps a ledger for (below) is named by that account's own
+account the holder keeps a record for (below) is named by that account's own
 record. `[addresses]` names the rest, a payee's say. An address nothing names
 leaves the cell empty, and the summary counts such movements.
 
@@ -327,10 +327,10 @@ JSON with every figure, the CSV of movements, the reader's
 `company-2026-history.pdf`, and a copy of each proofs
 file the statement cites on a UTXO's page, under its own name. No other
 proofs file is copied or named. Never the snapshots: their PSBTs carry the
-wallet's xpubs. The accounts' ledgers and the exchanges' raw answers stay
+wallet's xpubs. The accounts' records and the exchanges' raw answers stay
 too; the statement names them by hash, and they go on request.
 
-## The accounts' own records: the ledger file
+## The accounts' own records: the movements file
 
 Coins come into the wallets from somewhere and leave for somewhere, and the
 far end of most movements is an account the holder keeps with an exchange.
@@ -341,11 +341,11 @@ address table. The holder keeps it in the tree, one directory per account:
 ```
   company/
     bitstamp/                             # a custodial account, named as the holder likes
-      ledger.json                         # the account's deposits and withdrawals, in the ledger format
-      raw/                                # the exchange's own export or API answers, verbatim, named in ledger.json with their hashes
+      movements.json                      # the account's deposits and withdrawals, in the movements format
+      raw/                                # the exchange's own export or API answers, verbatim, named in movements.json with their hashes
 ```
 
-`ledger.json` is written by a short script of the holder's that asks the
+`movements.json` is written by a tool of the holder's that asks the
 exchange's API or reads its export, keeps the answer verbatim under `raw/`,
 and translates it into the format below; the script knows the exchange, the
 public packages know only the format. An entry is seen from the account's
@@ -358,7 +358,7 @@ fields may be left out; other keys are kept and not read.
 
 ```json
 {
-  "ledger": 1,
+  "movements": 1,
   "currency": "EUR",
   "source": {"name": "raw/crypto-transactions-2027-01-08.json", "sha256": "…"},
   "entries": [
@@ -379,7 +379,7 @@ account sent somewhere else, or received from somewhere else), and an amount
 that disagrees with the chain. Both are spelt out in section 1. The summary
 also counts the movements that have no named far end at all, which is where
 an auditor looks next; it is not a failed check, since a payee the holder has
-not named is the books' business. The ledger files and the raw answers stay
+not named is the books' business. The movements files and the raw answers stay
 with the holder, like the histories; the statement carries the account's
 name, the references and the source's hash, and the auditor asks for the raw
 export when they want it, as they would for a bank.
