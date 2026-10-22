@@ -103,8 +103,11 @@ deliberately does not do. The proofs themselves are bip322-audit's business
   check is two-sided: a movement the record matches must carry the record's
   amount on the chain (what the wallets received of a withdrawal, what they
   paid the account's address of a deposit), and an entry dated in the period
-  must be a transaction some wallet saw, else the account sent coins to, or
-  took them from, somewhere the statement does not cover. The package knows
+  must be a transaction some wallet saw, or one another account of the
+  holder's records from the other side (a withdrawal here, a deposit there,
+  one txid: a move between the holder's own accounts, matched between the
+  two records), else the account sent coins to, or took them from, somewhere
+  the statement does not cover. The package knows
   the format and no exchange: that knowledge is the holder's, as the signing
   devices are.
 * **The verdict.** `RESULT: OK` (exit status 0) when the reconciliation holds,

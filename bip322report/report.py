@@ -1098,6 +1098,13 @@ def format_summary(report: dict) -> str:
         lines.append("  awaiting signatures: " + ", ".join(report["pending_snapshots"]))
     for a in (report.get("endpoints") or {}).get("accounts", []):
         line = f"  account {a['name']}: {a['matched']}/{a['in_period']} entries of the period matched"
+        if a.get("between"):
+            moves = ", ".join(
+                f"{'from' if b['kind'] == 'deposit' else 'to'} {b['other']} {b['amount_btc']} BTC {b['time_utc'][:10]}"
+                + (f" (which says {btc(b['other_amount_sat'])})" if b["other_amount_sat"] != b["amount_sat"] else "")
+                for b in a["between"]
+            )
+            line += f"; {len(a['between'])} between the holder's accounts: {moves}"
         if a["unmatched"]:
             line += f"; UNMATCHED {len(a['unmatched'])}: " + "; ".join(_entry_text(e) + " seen by no wallet" for e in a["unmatched"])
         if a["mismatched"]:

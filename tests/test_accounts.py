@@ -65,7 +65,7 @@ def test_a_record_names_the_other_side_by_the_accounts_own_record(tmp_path, wall
     assert ends["ok"] and ends["accounts"] == [
         {
             "name": "bitstamp", "file": "movements.json", "currency": "EUR", "source": {"name": "raw/x.json", "sha256": "ab" * 32},
-            "entries": 2, "in_period": 2, "matched": 2, "unmatched": [], "mismatched": [],
+            "entries": 2, "in_period": 2, "matched": 2, "between": [], "unmatched": [], "mismatched": [],
         }
     ]  # fmt: skip
     assert report["unnamed_movements"] == 2  # bb and cc came from nobody the statement can name
@@ -189,3 +189,52 @@ def test_match_accounts_without_an_account_or_a_movement(wallet, tmp_path):
     assert report["endpoints"] is None and report["ok"] is False and "account" not in format_summary(report)
     account = Account.load(_record(tmp_path / "e" / "movements.json", []), "e")
     assert build_report(history, period, label="T", accounts=[account])["endpoints"]["accounts"][0]["entries"] == 0
+
+
+def test_a_move_between_two_of_the_holders_accounts_is_matched_between_their_records(tmp_path, wallet):
+    """Coins sent straight from one exchange to the other never touch a wallet: the two records match each other by txid."""
+    node = _node(wallet, tip=1012)
+    history, period = fetch_history(node), period_for_heights(node, 979, 1012)
+    when = _iso(1000)
+    a = Account.load(
+        _record(
+            tmp_path / "a" / "movements.json",
+            [{"kind": "withdrawal", "time_utc": when, "txid": "55" * 32, "amount_sat": 7_000_000, "reference": "W-5"}],
+        ),
+        "a",
+    )
+    b = Account.load(
+        _record(
+            tmp_path / "b" / "movements.json",
+            [{"kind": "deposit", "time_utc": when, "txid": "55" * 32, "amount_sat": 7_000_000, "reference": "D-5"}],
+        ),
+        "b",
+    )
+    report = build_report(history, period, label="T", accounts=[a, b])
+    ends = report["endpoints"]
+    assert ends["ok"] and [x["unmatched"] for x in ends["accounts"]] == [[], []]
+    assert [
+        (x["name"], x["in_period"], x["matched"], [(m["other"], m["other_amount_sat"]) for m in x["between"]]) for x in ends["accounts"]
+    ] == [
+        ("a", 1, 0, [("b", 7_000_000)]),
+        ("b", 1, 0, [("a", 7_000_000)]),
+    ]
+    summary = format_summary(report)
+    assert "  account a: 0/1 entries of the period matched; 1 between the holder's accounts: to b 0.07000000 BTC 2023-11-21\n" in summary
+    assert "  account b: 0/1 entries of the period matched; 1 between the holder's accounts: from a 0.07000000 BTC 2023-11-21\n" in summary
+    html = render_html(report)
+    assert "1 move straight from one of the holder's accounts to another, seen by no wallet, is matched between the two records" in html
+    # the two records disagree on the amount: still a move between them, and the summary says what the other says
+    b2 = Account.load(
+        _record(tmp_path / "b2" / "movements.json", [{"kind": "deposit", "time_utc": when, "txid": "55" * 32, "amount_sat": 6_990_000}]),
+        "b2",
+    )
+    summary = format_summary(build_report(history, period, label="T", accounts=[a, b2]))
+    assert "to b2 0.07000000 BTC 2023-11-21 (which says 0.06990000)" in summary
+    # the same kind on both sides is no move between them: two withdrawals of one txid, each unmatched
+    c = Account.load(
+        _record(tmp_path / "c" / "movements.json", [{"kind": "withdrawal", "time_utc": when, "txid": "55" * 32, "amount_sat": 7_000_000}]),
+        "c",
+    )
+    ends = build_report(history, period, label="T", accounts=[a, c])["endpoints"]
+    assert not ends["ok"] and all(len(x["unmatched"]) == 1 and x["between"] == [] for x in ends["accounts"])

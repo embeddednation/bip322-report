@@ -374,9 +374,13 @@ The statement matches each entry's txid against the wallets' transactions. A
 movement the record matches is named after the account, with the record's
 reference under the name, and its amount is checked against the chain. Two
 things fail the check "the accounts' own records agree with the movements":
-an entry dated in the period that no wallet of the statement saw (coins the
-account sent somewhere else, or received from somewhere else), and an amount
-that disagrees with the chain. Both are spelt out in section 1. The summary
+an entry dated in the period that no wallet of the statement saw and no
+other account of the holder's records (coins the account sent somewhere
+else, or received from somewhere else), and an amount that disagrees with
+the chain. Both are spelt out in section 1. A move straight from one of the
+holder's accounts to another, a withdrawal on the one record and a deposit
+with the same txid on the other, is matched between the two records and
+counted as such; the summary names both sides and their amounts. The summary
 also counts the movements that have no named far end at all, which is where
 an auditor looks next; it is not a failed check, since a payee the holder has
 not named is the books' business. The movements files and the raw answers stay

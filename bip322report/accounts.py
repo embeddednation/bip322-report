@@ -166,11 +166,17 @@ def match_accounts(accounts: list[Account], history: History, period: Period) ->
 
     Returns ``by_txid``, what a matched transaction's other side is by the account's record (account, kind from the
     account's side, reference, amount, fee); ``accounts``, per account the entries in the period, how many a wallet
-    transaction matches, the ``unmatched`` (dated in the period, seen by no wallet: coins that went somewhere else, or
-    came from somewhere else) and the ``mismatched`` (a movement of the period whose amount on the chain is not the
-    record's); and ``ok``, true when nothing is unmatched or mismatched.
+    transaction matches, the ``between`` (a move from one of the holder's accounts straight to another, which no wallet saw
+    but the other account's record does, by the same txid: each side names the other and the other's amount), the
+    ``unmatched`` (dated in the period, seen by no wallet and no other account: coins that went somewhere else, or came
+    from somewhere else) and the ``mismatched`` (a movement of the period whose amount on the chain is not the record's);
+    and ``ok``, true when nothing is unmatched or mismatched.
     """
     txs: dict[str, WalletTx] = {tx.txid: tx for tx in [*history.txs, *history.pending]}
+    elsewhere: dict[tuple[str, str], list[tuple[str, Entry]]] = {}  # (txid, kind) -> the other accounts' entries of that kind
+    for account in accounts:
+        for e in account.entries:
+            elsewhere.setdefault((e.txid, e.kind), []).append((account.name, e))
     by_txid: dict[str, dict] = {}
     rows = []
     for account in accounts:
@@ -178,14 +184,25 @@ def match_accounts(accounts: list[Account], history: History, period: Period) ->
         for e in account.entries:
             groups.setdefault(e.txid, []).append(e)
         in_period = matched = 0
+        between: list[dict] = []
         unmatched: list[dict] = []
         mismatched: list[dict] = []
         for txid, group in groups.items():
             tx = txs.get(txid)
             if tx is None:
-                dated = [e for e in group if period.start.time < e.time <= period.end.time]
-                in_period += len(dated)
-                unmatched.extend(e.to_dict() for e in dated)
+                for e in group:
+                    if not period.start.time < e.time <= period.end.time:
+                        continue
+                    in_period += 1
+                    other = (
+                        next((n, o) for n, o in elsewhere.get((txid, _opposite(e.kind)), []) if n != account.name)
+                        if any(n != account.name for n, _ in elsewhere.get((txid, _opposite(e.kind)), []))
+                        else None
+                    )
+                    if other is None:
+                        unmatched.append(e.to_dict())
+                    else:
+                        between.append({**e.to_dict(), "other": other[0], "other_amount_sat": other[1].amount_sat})
                 continue
             moved = tx.height is not None and period.start.height < tx.height <= period.end.height
             if moved:
@@ -193,8 +210,21 @@ def match_accounts(accounts: list[Account], history: History, period: Period) ->
                 matched += len(group)
                 mismatched.extend(_disagreements(tx, group))
             by_txid[txid] = _endpoint(account.name, group)
-        rows.append({**account.to_dict(), "in_period": in_period, "matched": matched, "unmatched": unmatched, "mismatched": mismatched})
+        rows.append(
+            {
+                **account.to_dict(),
+                "in_period": in_period,
+                "matched": matched,
+                "between": between,
+                "unmatched": unmatched,
+                "mismatched": mismatched,
+            }
+        )
     return {"by_txid": by_txid, "accounts": rows, "ok": all(not a["unmatched"] and not a["mismatched"] for a in rows)}
+
+
+def _opposite(kind: str) -> str:
+    return "deposit" if kind == "withdrawal" else "withdrawal"
 
 
 def _disagreements(tx: WalletTx, group: list[Entry]) -> list[dict]:

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.37.0 (2026-10-22)
+
+A move straight from one of the holder's accounts to another, which no
+wallet saw, is matched between the two records by its txid (a withdrawal
+on the one, a deposit on the other) and counted as such (`between` per
+account in the JSON, each side naming the other and the other's amount; the
+summary names them), no longer as an entry no wallet saw.
+
 ## 0.36.0 (2026-10-22)
 
 The account's record is `movements.json`, where 0.32 to 0.35 read
