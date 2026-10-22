@@ -20,7 +20,7 @@ from bip322core.verify import verify_message
 from . import TOOL
 from .coverage import cover_coins, load_proofs_files, pending_snapshots
 from .fiat import Rates
-from .history import Coin, History, WalletTx
+from .history import Coin, History, WalletTx, WriteOff
 from .ledger import Ledger, match_ledgers
 from .period import Period
 
@@ -47,8 +47,13 @@ def build_report(
     node_check: bool = True,
     node_clis: Mapping[str, BitcoinCli] | None = None,
     ledgers: Sequence[Ledger] | None = None,
+    written_off: Sequence[WriteOff] = (),
 ) -> dict:
     """The report as a plain dict (what report.json holds and the templates render).
+
+    ``written_off`` are the coins the holder has declared lost (:meth:`History.written_off`): each leaves the books at its block
+    by a row of kind ``written_off``, is held no more from then on and needs no proof; the period that holds the row lists it
+    under ``written_off`` and in the summary.
 
     ``ledgers`` are the holder's custodial accounts' own records (:mod:`bip322report.ledger`): a movement whose txid an
     account recorded is named after the account, with the record's reference, and its amount is checked against the
@@ -88,7 +93,7 @@ def build_report(
         raise ValueError(f"the dust threshold cannot be negative: {dust_sat}")
     dust = history.dust_at(dust_sat, period.end.height)
     created = {tx.txid: tx.iso_time for tx in history.txs}  # when each coin was received: the time of its creating transaction's block
-    history = history.without_dust(dust_sat)
+    history = history.without_dust(dust_sat).written_off(list(written_off))
     opening = history.coins_at(period.start.height)
     closing = history.coins_at(period.end.height)
     movements = history.between(period.start.height, period.end.height)
@@ -137,6 +142,17 @@ def build_report(
             "ok": closing_sat == opening_sat + net_sat,
         },
         "dust": _dust_block(dust, dust_sat, movements, created),
+        "written_off": [
+            {
+                **tx.ours_in[0].to_dict(),
+                "created_utc": created.get(tx.ours_in[0].txid),
+                "height": tx.height,
+                "time_utc": tx.iso_time,
+                "reason": tx.reason,
+            }
+            for tx in movements
+            if tx.kind == "written_off"
+        ],
         "coverage": _coverage(closing_rows, closing_sat, period.end.height),
         "proofs_files": [
             {**f.to_dict(), "timing": _timing(int(f.stamp["height"]), period.end.height), "used_for": used[f.path]}
@@ -275,13 +291,13 @@ def _wallet_block(
     s = sum(c.amount_sat for c in closing if c.wallet == wallet)
     rows, sums = _wallet_rows(movements, wallet, o, rates, names, endpoints or {})
     block = {"name": wallet, "opening_sat": o, "opening_btc": btc(o)}
-    sums["amount"] = sums["received"] - sums["sent"] + sums["mixed"]
+    sums["amount"] = sums["received"] - sums["sent"] + sums["mixed"] - sums["written_off"]
     for key, sat in sums.items():
         block[f"{key}_sat"], block[f"{key}_btc"] = sat, btc(sat)
     return {**block, "closing_sat": s, "closing_btc": btc(s), "transactions": rows, "history": source}
 
 
-SUMS = ("received", "sent", "fees", "mixed", "moved_in", "moved_out")
+SUMS = ("received", "sent", "fees", "mixed", "moved_in", "moved_out", "written_off")
 
 
 def _wallets_totals(blocks: list[dict]) -> dict:
@@ -324,6 +340,8 @@ def _wallet_share(tx: WalletTx, wallet: str, got: int, net: int) -> tuple[int, i
     """
     if tx.mixed:
         return net, None, {"mixed": net}
+    if tx.kind == "written_off":
+        return net, None, {"written_off": -net}  # the coin leaves the books: its amount, negative, nothing paid to anyone
     if tx.kind == "swept" or not any(c.wallet == wallet for c in tx.ours_in):
         from_wallets = bool(tx.ours_in) and tx.kind != "swept"
         return got, None, {"received": got, **({"moved_in": got} if from_wallets else {})}  # no fee of its own: the payer's
@@ -481,8 +499,8 @@ def _movement_rows(
     (``totals["fiat"]``; None for a sum some rate was missing for).  For a holder (``holder``) each row also names the
     wallet of the holder's it touched."""
     rows = []
-    received = sent = fees = mixed = mixed_count = 0
-    valued = dict.fromkeys(("received", "sent", "fees", "mixed"), Decimal(0))
+    received = sent = fees = mixed = mixed_count = lost = lost_count = 0
+    valued = dict.fromkeys(("received", "sent", "fees", "mixed", "written_off"), Decimal(0))
     unvalued = False
     running = opening_sat
     for tx in movements:
@@ -509,10 +527,10 @@ def _movement_rows(
             if row["fiat"]["rate"] is None:
                 unvalued = True
         rows.append(row)
-        key = {"receive": "received", "swept": "received", "send": "sent", "mixed": "mixed"}.get(
+        key = {"receive": "received", "swept": "received", "send": "sent", "mixed": "mixed", "written_off": "written_off"}.get(
             tx.kind
-        )  # swept: dust the wallet spent, booked where it was spent
-        sign = -1 if key == "sent" else 1
+        )  # swept: dust the wallet spent, booked where it was spent; written_off: a coin declared lost, leaving the books
+        sign = -1 if key in ("sent", "written_off") else 1
         if key == "received":
             received += amount
         elif key == "sent":
@@ -520,13 +538,16 @@ def _movement_rows(
         elif key == "mixed":
             mixed += amount
             mixed_count += 1
+        elif key == "written_off":
+            lost += -amount
+            lost_count += 1
         if key and rates and row["fiat"]["amount"] is not None:
             valued[key] += sign * Decimal(row["fiat"]["amount"])
         if tx.fee_sat:
             fees += tx.fee_sat
             if rates and row["fiat"]["fee"] is not None:
                 valued["fees"] += Decimal(row["fiat"]["fee"])
-    amount_sat = received - sent + mixed  # the sum of the rows' amounts: an internal move's is zero
+    amount_sat = received - sent + mixed - lost  # the sum of the rows' amounts: an internal move's is zero
     net_sat = running - opening_sat
     totals = {
         "received_sat": received,
@@ -536,6 +557,9 @@ def _movement_rows(
         "mixed_sat": mixed,
         "mixed_btc": btc(mixed),
         "mixed_count": mixed_count,
+        "written_off_sat": lost,
+        "written_off_btc": btc(lost),
+        "written_off_count": lost_count,
         "amount_sat": amount_sat,
         "amount_btc": btc(amount_sat),
         "fees_sat": fees,
@@ -827,8 +851,11 @@ def _onchain(cli: BitcoinCli, closing_rows: list[dict], period: Period, scripts:
 
 
 def _spent_by(tx: WalletTx | None) -> dict | None:
-    """The confirmed transaction that has spent a closing coin since, as far as the history knows; what the SPENT SINCE note names."""
-    return {"txid": tx.txid, "height": tx.height, "time_utc": tx.iso_time} if tx else None
+    """The confirmed transaction that has spent a closing coin since, as far as the history knows, or the write-off that took it
+    out of the books; what the SPENT SINCE note names."""
+    if tx is None:
+        return None
+    return {"txid": tx.txid, "height": tx.height, "time_utc": tx.iso_time, "written_off": tx.written_off, "reason": tx.reason}
 
 
 def _by_address(rows: list[dict]) -> list[dict]:
@@ -1051,6 +1078,11 @@ def format_summary(report: dict) -> str:
     d = report.get("dust") or {}
     if d.get("count"):
         lines.append(f"dust: {d['count']} outputs of at most {d['threshold_sat']} sat, {d['total_btc']} BTC, left out of every figure")
+    if report.get("written_off"):
+        lines.append(
+            "written off in the period: "
+            + ", ".join(f"{w['amount_btc']} BTC {w['time_utc'][:10]} ({w['reason']})" for w in report["written_off"])
+        )
     for f in report["proofs_files"]:
         lines.append(
             f"  proofs {f['file']}: stamp {f['stamp']['height']}, signatures {f['signatures']}, {'verified' if f['verified'] else 'NOT VERIFIED'}, used for {f['used_for']}"

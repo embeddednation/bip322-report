@@ -47,7 +47,7 @@ from bip322core.core import BIP322Error
 from . import TOOL
 from .coverage import pending_snapshots, proofs_names
 from .fiat import Rates
-from .history import History, fetch_history
+from .history import History, WriteOff, fetch_history
 from .holder import merge_histories
 from .ledger import LedgerError, find_ledgers
 from .names import counterparts, name_by_wallets
@@ -404,6 +404,31 @@ def _dust(args, config: Config, wallet: str | None, *, holder: str | None = None
     return dust
 
 
+def _written_off(config: Config, cli: BitcoinCli, history: History) -> list[WriteOff]:
+    """``[written_off]`` in bip322.toml: ``"TXID:VOUT" = { date = "YYYY-MM-DD", reason = "…" }``, each resolved to the first block
+    of that day on the node (the block after the last one before the instant), which must be in the history."""
+    table = config.data.get("written_off") or {}
+    if not isinstance(table, dict):
+        raise CLIError('[written_off] in bip322.toml must be a table: "TXID:VOUT" = { date = "YYYY-MM-DD", reason = "…" }')
+    out = []
+    for key, value in table.items():
+        txid, sep, vout = str(key).partition(":")
+        if not sep or len(txid) != 64 or not vout.isdigit():
+            raise CLIError(f"[written_off] {key}: the key must be TXID:VOUT")
+        if not isinstance(value, dict) or not isinstance(value.get("date"), str) or not isinstance(value.get("reason"), str):
+            raise CLIError(f'[written_off] {key}: the value must be {{ date = "YYYY-MM-DD", reason = "…" }}')
+        try:
+            when = parse_when(value["date"])
+        except ValueError as exc:
+            raise CLIError(f"[written_off] {key}: {exc}") from exc
+        before = last_block_before(cli, when)
+        if before.height + 1 > history.tip_height:
+            raise CLIError(f"[written_off] {key}: dated {value['date']}, after the history's tip (block {history.tip_height})")
+        first = block(cli, before.height + 1)
+        out.append(WriteOff((txid.lower(), int(vout)), first.height, first.time, first.hash, value["reason"]))
+    return out
+
+
 def _period(args, cli: BitcoinCli, history: History, period_label: str) -> Period:
     """The period's opening and closing blocks, resolved on the node; never beyond the history."""
     # a period to date closes no higher than the history's own tip: a block that arrived since the history was read is not in it
@@ -489,6 +514,7 @@ def cmd_report(args) -> int:
     node_clis = {w: _cli(args, config, w) for w in loaded}  # each loaded wallet's node wallet: the listunspent check is per wallet
     cli = node_clis[loaded[0]] if loaded else _cli(args, config, members[0], rpcwallet=False)  # any one node for the chain-level work
     period = _period(args, cli, history, period_label) if period_label else _whole_life(cli, history)
+    written_off = _written_off(config, cli, history)
     _finalize_signed(args, paths, loaded, period.end.height)  # what has been signed at the closing block becomes a proofs file first
     names = _names(args, config, history, period, members)
     directory = Path(args.output) if args.output else holder_statements_dir(key) / period.label
@@ -507,6 +533,7 @@ def cmd_report(args) -> int:
         sources=sources,
         node_clis=node_clis,
         ledgers=ledgers,
+        written_off=written_off,
     )
     report["previous"] = previous_statement(holder_statements_dir(key), report)
     if args.prove and not report["coverage"]["complete"]:

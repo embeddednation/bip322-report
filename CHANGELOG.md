@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.35.0 (2026-10-22)
+
+Write-offs. `[written_off]` in `bip322.toml` (`"TXID:VOUT" = { date =
+"YYYY-MM-DD", reason = "…" }`) declares a coin lost: the statement of the
+period that holds the date books a row of kind `written_off` in the first
+block of that day (`History.written_off`, `WriteOff`), the amount in
+parentheses, summed on the first page (`totals.written_off_*`, the wallets'
+`written_off_sat`) and listed in the JSON (`written_off`) and the summary;
+from that block the coin is no holding and needs no proof, and the notes say
+the output stays on the chain. A coin the wallets never had, not yet
+confirmed at the date, or spent before it, is refused. A closing UTXO
+written off after the period says so on its page.
+
 ## 0.34.0 (2026-10-22)
 
 A wallet of the holder's with nothing in the period, no movement and

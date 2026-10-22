@@ -267,6 +267,8 @@ def _side(row: dict) -> str:
         return "Internal move"
     if row["kind"] == "swept":
         return "Dust swept"
+    if row["kind"] == "written_off":
+        return f"Written off, {row['reason']}" if row.get("reason") else "Written off"
     if row["kind"] == "mixed":
         return f"Joint transaction with {other}" if other else "Joint transaction"
     return other
@@ -349,6 +351,7 @@ KINDS = {  # a movement's kind, in the reader's words
     "internal": "Internal move",
     "mixed": "Joint transaction",
     "swept": "Dust swept",
+    "written_off": "Written off",
     "transfer": "Transfer",
 }
 

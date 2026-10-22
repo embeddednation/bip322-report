@@ -50,6 +50,17 @@ deliberately does not do. The proofs themselves are bip322-audit's business
   before it. Dust the wallet does spend is booked in the block that spends
   it, as a movement of kind `swept` standing right before the spending
   transaction, which is itself unchanged: every amount and fee stays exact.
+* **Write-offs** (`[written_off]` in `bip322.toml`). A coin whose keys are
+  gone is on the chain for ever and can never be proven; the holder declares
+  it lost, with a date and a reason, and the history gets a row of kind
+  `written_off` in the first block of that day, standing last in its block,
+  that spends the coin into nothing: a loss, not a payment, so no
+  counterparty and no record elsewhere. From that block the coin is held no
+  more and asks for no proof; earlier statements are untouched, and the
+  reconciliation holds, since the row moves the balance by the amount. The
+  notes name it and say the output stays on the chain. A coin the wallets
+  never had, or one already spent by the date, is refused: a write-off is
+  a declaration about the books, never a way to lose track of a coin.
 * **Coverage.** A closing coin is covered when a verified proofs file carries a
   proof for its address stamped at or after the closing block: every
   signature valid, the stamp block in the main chain, no listed output

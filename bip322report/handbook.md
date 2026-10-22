@@ -401,6 +401,24 @@ when its block is at or after the closing block, which it rarely is; the
 year-end snapshot gives the change a proof at the closing block, and until
 then the statement shows the change UTXO as proven before it.
 
+**Lost keys.** A coin whose keys are gone is on the chain for ever and can
+never be proven. Write it off, as the books do, in `bip322.toml`:
+
+```toml
+[written_off]
+"c87ff7…:1" = { date = "2024-06-01", reason = "keys of the old wallet lost" }
+```
+
+The statement of the period that holds the date books it as a row of its
+own, `Written off, keys of the old wallet lost`, the amount in parentheses,
+in the first block of that day; a line on the first page sums the period's
+write-offs. From that block on the coin is no longer a holding and no proof
+is asked for it; before it, it was held as it was, and a statement that closed
+on it then still shows it. The notes say what was written off and why, and
+that the output stays on the chain, unspent: what is declared is a loss, not
+a payment. A write-off of a coin the wallets never had, or one already spent
+by that date, is refused.
+
 **New deposit addresses.** Prove them the same way, or after the fact:
 
 ```sh

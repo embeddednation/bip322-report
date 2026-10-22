@@ -265,6 +265,11 @@ without the split.
   the check. The file is written by a script of the holder's from the
   exchange's export or API, which stays beside it; the package knows the
   format, no exchange.
+* A coin whose keys are lost is written off in `bip322.toml`
+  (`[written_off]`, `"TXID:VOUT" = { date = …, reason = … }`): a row of its
+  own in the period that holds the date, the amount in parentheses, after
+  which the coin is no holding and needs no proof; the notes say so, and that
+  the output stays on the chain.
 * `--dust SATS`: an output of at most SATS satoshi is dust when others
   paid it to the wallet in a transaction that spends nothing of the
   wallet's. Dust is left out of every figure, as if it had never been the

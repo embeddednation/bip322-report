@@ -116,7 +116,7 @@ def test_report_backs_every_closing_coin_with_a_verified_proof(tmp_path, wallet,
         "received_sat": 0, "received_btc": "0.00000000", "sent_sat": 20_000_000, "sent_btc": "0.20000000",
         "mixed_sat": 0, "mixed_btc": "0.00000000", "mixed_count": 0, "amount_sat": -20_000_000, "amount_btc": "-0.20000000",
         "fees_sat": 1_100_000, "fees_btc": "0.01100000", "net_sat": -21_100_000, "net_btc": "-0.21100000", "transactions": 2,
-        "fiat": None,
+        "written_off_sat": 0, "written_off_btc": "0.00000000", "written_off_count": 0, "fiat": None,
     }  # fmt: skip
     cov = report["coverage"]
     # bb's proof is from block 1000, before the closing block 1020: it shows control then, not at the period's end
@@ -591,7 +591,13 @@ def test_spent_since_names_the_spending_transaction(tmp_path, wallet, signer_exp
     report = build_report(fetch_history(node), period, label="T", proofs_roots=[ledger], cli=node)
     rows = {c["txid"][:2]: c for c in report["closing"]["coins"]}
     assert {k: r["onchain"]["status"] for k, r in rows.items()} == {"aa": "spent_since", "bb": "matches", "cc": "spent_since"}
-    assert rows["aa"]["spent_by"] == {"txid": "dd" * 32, "height": 1005, "time_utc": "2023-11-21T21:43:20Z"}
+    assert rows["aa"]["spent_by"] == {
+        "txid": "dd" * 32,
+        "height": 1005,
+        "time_utc": "2023-11-21T21:43:20Z",
+        "written_off": False,
+        "reason": None,
+    }
     assert rows["cc"]["spent_by"]["txid"] == "ee" * 32 and rows["cc"]["spent_by"]["height"] == 1010 and rows["bb"]["spent_by"] is None
     html = render_html(report)
     assert html.count("SPENT SINCE") == 2 and "the spending transaction is in" not in html

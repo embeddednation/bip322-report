@@ -69,6 +69,8 @@ class WalletTx:
     blockindex: int | None = None  # position in its block; None while unconfirmed, and in a history saved before this was recorded
     swept: bool = False  # not a transaction: dust entering the books in the block where the wallet spent it (History.without_dust)
     payers: list[str] = field(default_factory=list)  # the addresses behind the inputs that were not the wallet's, when the node could tell
+    written_off: bool = False  # not a transaction: a coin the holder declared lost, leaving the books at this block (History.written_off)
+    reason: str | None = None  # why, as the holder put it
 
     @property
     def net_sat(self) -> int:
@@ -77,7 +79,7 @@ class WalletTx:
     @property
     def mixed(self) -> bool:
         """Funded by this wallet and by others together: what the wallet paid of the fee cannot be known."""
-        if not self.ours_in:
+        if not self.ours_in or self.written_off:
             return False
         return self.fee_sat is None if self.others_in is None else self.others_in > 0  # the fee is computed only when every input is ours
 
@@ -87,6 +89,8 @@ class WalletTx:
         booked late; in a holder's merged history, transfer when everything came back but more than one wallet was involved."""
         if self.swept:
             return "swept"
+        if self.written_off:
+            return "written_off"
         if not self.ours_in:
             return "receive"
         if self.mixed:
@@ -118,6 +122,7 @@ class WalletTx:
             "ours_in": [c.to_dict() for c in self.ours_in],
             "ours_out": [c.to_dict() for c in self.ours_out],
             "others_out": [c.to_dict() for c in self.others_out],
+            **({"written_off": True, "reason": self.reason} if self.written_off else {}),
         }
 
     @classmethod
@@ -134,7 +139,20 @@ class WalletTx:
             d.get("others_in"),
             d.get("blockindex"),
             payers=[str(a) for a in d.get("payers") or []],
+            written_off=bool(d.get("written_off")),
+            reason=d.get("reason"),
         )
+
+
+@dataclass(frozen=True)
+class WriteOff:
+    """A coin the holder has declared lost: its outpoint, the block it leaves the books at, and why."""
+
+    outpoint: Outpoint
+    height: int
+    time: int
+    blockhash: str | None
+    reason: str
 
 
 @dataclass
@@ -220,6 +238,35 @@ class History:
             return out
 
         return History(self.chain, self.wallet, self.tip_height, self.tip_hash, self.fetched_utc, rewrite(self.txs), rewrite(self.pending))
+
+    def written_off(self, items: list[WriteOff]) -> History:
+        """This history with each item's coin leaving the books at the item's block, by a row of kind ``written_off`` that stands
+        last in that block: the holder's declaration that the coin, still on the chain, is lost to it.  From that block on the
+        coin is held no more and needs no proof; before it, it was held as it was.
+
+        A coin that is not an output of the wallet's, or was not yet confirmed at that block, or was already spent by then,
+        is refused with ``ValueError``.
+        """
+        if not items:
+            return self
+        txs = list(self.txs)
+        for item in items:
+            coin = next((c for tx in self.txs for c in tx.ours_out if c.outpoint == item.outpoint), None)
+            name = f"{item.outpoint[0]}:{item.outpoint[1]}"
+            if coin is None:
+                raise ValueError(f"{name} is not an output of the wallets' (the write-off names a coin the statement never saw)")
+            if coin.height is None or coin.height > item.height:
+                raise ValueError(f"{name} was not confirmed yet at block {item.height}, where it is written off")
+            spender = self.spender_of(item.outpoint)
+            if spender is not None and spender.height is not None and spender.height <= item.height:
+                raise ValueError(f"{name} was spent at block {spender.height}, before it is written off at block {item.height}")
+            txs.append(
+                WalletTx(
+                    coin.txid, item.height, item.blockhash, item.time, ours_in=[coin], others_in=0, written_off=True, reason=item.reason
+                )
+            )
+        txs.sort(key=lambda tx: (tx.height, tx.blockindex if tx.blockindex is not None else 10**9))
+        return History(self.chain, self.wallet, self.tip_height, self.tip_hash, self.fetched_utc, txs, list(self.pending))
 
     def spender_of(self, outpoint: Outpoint) -> WalletTx | None:
         for tx in self.txs:
