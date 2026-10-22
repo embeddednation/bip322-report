@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.35.2 (2026-10-22)
+
+Section 1 flows. A wallet's movements were kept whole on one page where
+they fit and pushed to the next page where they did not, so a holder's
+wallets broke pages with no pattern; now each wallet's table runs over
+pages as it must, the header row repeated on each, the heading with the
+first rows and the closing row with the last.
+
 ## 0.35.1 (2026-10-22)
 
 A holder's statement said "Internal move" for a write-off in the wallet's

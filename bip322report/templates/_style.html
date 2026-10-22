@@ -21,6 +21,10 @@
   span.meta { string-set: generated attr(data-generated), ref attr(data-ref); }
   .page { break-before: page; }
   .keep { break-inside: avoid; }
+  /* a wallet's movements flow over pages: the heading stays with the first rows, the header row repeats, the closing row stays with the last */
+  .flow thead { break-after: avoid; }
+  .flow tr.open { break-before: avoid; }
+  .flow tr.total { break-before: avoid; }
 
   /* text */
   html { font: 9.5pt/1.45 var(--font-body); color: var(--ink); background: var(--bg); }
