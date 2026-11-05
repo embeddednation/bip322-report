@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.38.1 (2026-11-05)
+
+Only a wallet whose kept history is missing or ends before the closing block
+is asked by the node about the addresses no kept history names; 0.38.0
+asked every loaded wallet of the tree, the other holder's included, as soon
+as one address was unnamed.
+
 ## 0.38.0 (2026-11-05)
 
 One file per holder (bip322-audit 0.26): the statement reads the tree's

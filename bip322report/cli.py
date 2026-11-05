@@ -177,23 +177,29 @@ def _loaded(args, names: list[str]) -> dict[str, BitcoinCli]:
 
 def _names(args, config: Config, history: History, period: Period, own: list[str]) -> dict[str, str]:
     """The other side of the period's movements named: ``[addresses]``, else the wallet of the tree whose kept history used the
-    address, else the wallet, loaded on its node, whose node says the address is its own; ``own`` are the statement's wallets, whose
-    addresses need no name."""
+    address, else, for an address still unnamed, the wallet whose node says it is its own; ``own`` are the statement's wallets,
+    whose addresses need no name.  A kept history that reaches the closing block holds every transaction of the period, so only a
+    wallet whose history is missing or behind it can still own an unnamed address: those alone are asked, if loaded."""
     addresses = counterparts(history.between(period.start.height, period.end.height))
     known = dict(config.addresses)
-    others = sorted(w for w in wallets() if w not in own)
-    for w in others:  # the kept histories first: every address the wallet ever used, loaded or not, no node asked
+    behind = []
+    for w in sorted(w for w in wallets() if w not in own):  # the kept histories first: every address each wallet ever used
         path = wallet_dirs()[w] / HISTORY_FILE
-        if path.is_file():
-            try:
-                used = History.load(path).addresses()
-            except (OSError, ValueError, KeyError, TypeError):
-                _progress(f"{w}: {path.name} is not readable; its addresses are named by the node, if loaded")
-                continue
-            for address in addresses & used:
-                known.setdefault(address, w)
+        if not path.is_file():
+            behind.append(w)
+            continue
+        try:
+            kept = History.load(path)
+        except (OSError, ValueError, KeyError, TypeError):
+            _progress(f"{w}: {path.name} is not readable; its addresses are named by the node, if loaded")
+            behind.append(w)
+            continue
+        for address in addresses & kept.addresses():
+            known.setdefault(address, w)
+        if kept.tip_height < period.end.height:
+            behind.append(w)
     unknown = [a for a in addresses if a not in known]
-    return name_by_wallets(addresses, known, _loaded(args, others) if unknown else {}, _progress)
+    return name_by_wallets(addresses, known, _loaded(args, behind) if unknown and behind else {}, _progress)
 
 
 def _add_node_args(p: argparse.ArgumentParser, *, wallet: bool = True) -> None:

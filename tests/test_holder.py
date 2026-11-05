@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from bip322audit.rpc import BitcoinCli, RpcError
-from fake_node import FakeNode, block_time
+from fake_node import FakeNode, block_time, fake_hash
 
 import bip322report.cli as cli_module
 from bip322report.history import History, fetch_history
@@ -325,6 +325,16 @@ def test_the_statement_is_the_holders(wallet, tmp_path, monkeypatch, capsys):
     )
     assert cli_module.main(["report", "company", "-o", str(tmp_path / "company")]) == 1
     assert "asking" not in capsys.readouterr().err  # cold's kept history names its addresses: no node asked
+    kept = json.loads((root / "jonas" / "cold" / "history.json").read_text())
+    behind = {
+        **kept,
+        "tip_height": 1003,
+        "tip_hash": fake_hash(1003),
+        "transactions": [t for t in kept["transactions"] if t["height"] <= 1003],
+    }
+    (root / "jonas" / "cold" / "history.json").write_text(json.dumps(behind))  # kept before the period's movements
+    assert cli_module.main(["report", "company", "--from-height", "1004", "--to-height", "1010", "-o", str(tmp_path / "behind")]) == 1
+    assert "asking cold which of" in capsys.readouterr().err  # a history behind the closing block: cold may own what it does not name
     (root / "jonas" / "cold" / "history.json").unlink()
     assert cli_module.main(["report", "company", "-o", str(tmp_path / "company2")]) == 1
     assert "asking cold which of 2 addresses are theirs" in capsys.readouterr().err  # without it, the node, since cold is loaded

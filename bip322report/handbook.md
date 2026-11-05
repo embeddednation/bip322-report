@@ -141,9 +141,11 @@ its addresses: a send by the addresses it paid, a receive by the addresses it
 came from, which the node reads from the block (Bitcoin Core 25 or later, no
 `txindex` needed). A wallet of the tree, the holder's own or another
 holder's, names its addresses itself: its kept history says which addresses
-it used, and a wallet loaded on its node is asked about the rest, so a move
-between two wallets needs no entry anywhere and a wallet no longer loaded
-still names its own. A movement to or from an account the holder keeps a
+it used, and only a wallet whose kept history is missing or ends before the
+closing block is asked about the rest, if its node has it loaded; so a move
+between two wallets needs no entry anywhere, a wallet no longer loaded still
+names its own, and a statement of one holder asks nothing of the other's
+wallets once their histories are current (a statement of theirs keeps them). A movement to or from an account the holder keeps a
 record for (below) is named by that account's own record. `[addresses]`
 names the rest, a payee's say. An address nothing names leaves the cell
 empty, and the summary counts such movements.
