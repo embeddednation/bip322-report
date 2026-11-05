@@ -3,6 +3,7 @@
 import csv
 import json
 import os
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -193,6 +194,8 @@ class _Switch(BitcoinCli):
 
     def call(self, method, *params):
         name = next((a.removeprefix("-rpcwallet=") for a in self.argv if a.startswith("-rpcwallet=")), None)
+        if method == "listwallets":
+            return list(self.nodes)
         if name is None:  # no wallet named: the node itself answers
             return (self.node or next(iter(self.nodes.values()))).call(method, *params)
         if name not in self.nodes:
@@ -214,12 +217,13 @@ def test_the_statement_is_the_holders(wallet, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli_module, "BitcoinCli", lambda command: _Switch(nodes, chain))
     monkeypatch.setattr(cli_module, "_pdf_possible", lambda: False)
     root = Path(os.environ["BIP322_DIR"])
+    shutil.rmtree(root / "h")  # the fixture's holder: this test's holders are its own
     for name in ("treasury", "cold"):
         _wallet_dir(root / "company" / name)
-    (root / "bip322.toml").write_text(
-        'explorer = ""\n[holders.company]\nname = "Company AB"\nexplorer = "https://example.org"\n'  # the holder's beats the top level
-        f'\n[addresses]\n"{EXCHANGE}" = "Exchange"\n"{OTHER}" = "Exchange"\n'
-    )
+    (root / "bip322.toml").write_text(f'explorer = ""\n[addresses]\n"{EXCHANGE}" = "Exchange"\n"{OTHER}" = "Exchange"\n')
+    (root / "company" / "holder.toml").write_text(
+        'name = "Company AB"\nexplorer = "https://example.org"\n'
+    )  # the holder's beats the tree's
     monkeypatch.chdir(root)
     assert cli_module.main(["report"]) == 1  # the one holder needs no naming; no proofs: ATTENTION, the statement is written all the same
     out, err = capsys.readouterr()
@@ -308,19 +312,28 @@ def test_the_statement_is_the_holders(wallet, tmp_path, monkeypatch, capsys):
     assert "treasury is not loaded on the node, and " in capsys.readouterr().err and not (tmp_path / "refused").exists()
     nodes.update(treasury=treasury_node, cold=cold_node)
     treasury_node.tip_height = 1010
-    assert "https://example.org/tx/" in (directory / f"company-{date}.html").read_text()  # explorer from [holders.company]
+    assert "https://example.org/tx/" in (directory / f"company-{date}.html").read_text()  # explorer from company/holder.toml
     # a period; the holder named by its directory
     assert cli_module.main(["report", "company", "--from-height", "1004", "--to-height", "1010"]) == 1
     out, _ = capsys.readouterr()
     assert out.strip() == str(root / "company" / "statements" / "1004..1010")
-    # a second holder: cold moves under it; then the holder must be named, or be the current directory's, or bip322.toml's
+    # a second holder: cold moves under it; then the holder must be named, or be the current directory's
     (root / "jonas").mkdir()
     (root / "company" / "cold").rename(root / "jonas" / "cold")
     assert (
         cli_module.main(["report"]) == 2 and "which holder? bip322 report HOLDER (holders here: company, jonas)" in capsys.readouterr().err
     )
     assert cli_module.main(["report", "company", "-o", str(tmp_path / "company")]) == 1
-    assert "asking cold which of 2 addresses are theirs" in capsys.readouterr().err
+    assert "asking" not in capsys.readouterr().err  # cold's kept history names its addresses: no node asked
+    (root / "jonas" / "cold" / "history.json").unlink()
+    assert cli_module.main(["report", "company", "-o", str(tmp_path / "company2")]) == 1
+    assert "asking cold which of 2 addresses are theirs" in capsys.readouterr().err  # without it, the node, since cold is loaded
+    nodes.pop("cold")
+    assert cli_module.main(["report", "company", "-o", str(tmp_path / "company3")]) == 1
+    assert "asking" not in capsys.readouterr().err  # not loaded: not asked, its addresses unnamed
+    nodes["cold"] = cold_node
+    assert cli_module.main(["report", "jonas", "-o", str(tmp_path / "jonas0")]) == 0  # keeps cold's history again
+    capsys.readouterr()
     assert cli_module.main(["company", "-o", str(tmp_path / "bare")]) == 1  # bip322 report company: the holder's statement
     capsys.readouterr()
     assert (tmp_path / "bare" / f"company-{date}.json").exists()
@@ -352,12 +365,11 @@ def test_the_statement_is_the_holders(wallet, tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(root / "jonas" / "cold")
     assert cli_module.main(["report", "-o", str(tmp_path / "here")]) == 0 and (tmp_path / "here" / f"jonas-{date}.json").exists()
     monkeypatch.chdir(root)
-    (root / "bip322.toml").write_text(
-        'holder = "jonas"\n[wallets.cold]\ndust = 5\n'
-    )  # a statement key in a wallet's table: not read, said so
-    assert cli_module.main(["report", "-o", str(tmp_path / "default")]) == 0 and (tmp_path / "default" / f"jonas-{date}.json").exists()
+    (root / "jonas" / "holder.toml").write_text("[wallets.cold]\ndust = 5\n")  # a statement key in a wallet's table: not read, said so
+    assert cli_module.main(["report", "jonas", "-o", str(tmp_path / "default")]) == 0
+    assert (tmp_path / "default" / f"jonas-{date}.json").exists()
     assert (
-        "note: dust in [wallets.cold] is not read by the statement, which is the holder's: set it in [holders.jonas]"
+        "note: dust in [wallets.cold] is not read by the statement, which is the holder's: set it in jonas/holder.toml"
         in capsys.readouterr().err
     )
     assert cli_module.main(["report", "nobody", "-o", str(tmp_path / "nobody")]) == 2

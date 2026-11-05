@@ -77,7 +77,7 @@ def test_the_statement_reads_the_write_offs_from_the_config(wallet, run, monkeyp
     _member(node)
     root = Path(os.environ["BIP322_DIR"])
     date = "2023-11-21T22:05:00Z"  # between blocks 1007 (22:03:20) and 1008: the write-off stands in block 1008, the first at or after it
-    (root / "bip322.toml").write_text(f'holder = "h"\n[written_off]\n"{"bb" * 32}:0" = {{ date = "{date}", reason = "keys lost" }}\n')
+    (root / "h" / "holder.toml").write_text(f'[written_off]\n"{"bb" * 32}:0" = {{ date = "{date}", reason = "keys lost" }}\n')
     code, out, err = run(node, "report", "--from-height", "979", "--to-height", "1012", "-o", "w")
     assert code == 1 and "written off in the period: 0.25000000 BTC 2023-11-21 (keys lost)" in err  # ATTENTION: no proofs
     written = json.loads(next(p for p in Path("w").iterdir() if p.name.endswith(".json")).read_text())
@@ -92,11 +92,11 @@ def test_the_statement_reads_the_write_offs_from_the_config(wallet, run, monkeyp
         "Written off, keys lost"
         in next(p for p in Path("w").iterdir() if p.name.endswith(".html") and "-history" not in p.name).read_text()
     )
-    (root / "bip322.toml").write_text('holder = "h"\n[written_off]\n"nonsense" = { date = "2023-11-21", reason = "x" }\n')
+    (root / "h" / "holder.toml").write_text('[written_off]\n"nonsense" = { date = "2023-11-21", reason = "x" }\n')
     assert run(node, "report", "--from-height", "979", "--to-height", "1012", "-o", "x")[0] == 2
-    (root / "bip322.toml").write_text(f'holder = "h"\n[written_off]\n"{"bb" * 32}:0" = {{ date = "2099-01-01", reason = "x" }}\n')
+    (root / "h" / "holder.toml").write_text(f'[written_off]\n"{"bb" * 32}:0" = {{ date = "2099-01-01", reason = "x" }}\n')
     code, out, err = run(node, "report", "--from-height", "979", "--to-height", "1012", "-o", "y")
     assert code == 2 and "after the history's tip" in err
-    (root / "bip322.toml").write_text(f'holder = "h"\n[written_off]\n"{"aa" * 32}:0" = {{ date = "{date}", reason = "x" }}\n')
+    (root / "h" / "holder.toml").write_text(f'[written_off]\n"{"aa" * 32}:0" = {{ date = "{date}", reason = "x" }}\n')
     code, out, err = run(node, "report", "--from-height", "979", "--to-height", "1012", "-o", "z")
     assert code == 2 and "was spent at block 1005" in err

@@ -27,7 +27,7 @@ def test_prove_takes_the_snapshots_the_statement_lacks_and_the_rerun_finalizes_t
     member = _member(node)  # h/watch, a wallet of the tree, loaded on the node
     monkeypatch.setattr(audit_cli, "BitcoinCli", lambda command: node)  # the snapshot and the finalize run on the same fake node
     root = Path(os.environ["BIP322_DIR"])
-    (root / "bip322.toml").write_text('holder = "h"\n[holders.h]\nname = "Holder H"\n')
+    (root / "h" / "holder.toml").write_text('name = "Holder H"\n')
     heights = ["--from-height", "979", "--to-height", "1012"]
 
     # the statement first, to see what it covers: three closing UTXOs, none proven

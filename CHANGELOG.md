@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.38.0 (2026-11-05)
+
+One file per holder (bip322-audit 0.26): the statement reads the tree's
+`bip322.toml` and the holder's `holder.toml` as one, the holder's winning,
+so `name`, `[wallets.NAME]`, `[written_off]` and the keys a holder overrides
+stand in its directory; the `[holders.KEY]` tables and `holder = KEY` of
+earlier versions are refused and noted as bip322-audit does. The holder is
+the word after the options, the directory the command runs in, or the
+tree's one. The other side of a movement is named by the other wallets'
+kept histories first, every address each ever used, and the node is asked
+only about what is left, and only for wallets it has loaded: a wallet no
+longer loaded names its own addresses all the same, and nothing is asked
+about the other holder's wallets that cannot answer.
+
 ## 0.37.0 (2026-10-22)
 
 A move straight from one of the holder's accounts to another, which no

@@ -33,5 +33,7 @@ def data_directory(tmp_path, monkeypatch):
     monkeypatch.setattr(datadir, "_chosen", None)  # no --dir left over from a test before
     monkeypatch.setattr(datadir, "_holder", None)  # nor a -w KEY/NAME
     (tmp_path / "bip322").mkdir()
-    (tmp_path / "bip322" / "bip322.toml").write_text('holder = "h"\n')  # the holder a new wallet goes under
+    (tmp_path / "bip322" / "bip322.toml").write_text("")
+    (tmp_path / "bip322" / "h").mkdir()
+    (tmp_path / "bip322" / "h" / "holder.toml").write_text("")  # the tree's one holder: where a new wallet goes
     return tmp_path / "bip322"

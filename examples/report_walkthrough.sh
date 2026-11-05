@@ -77,7 +77,7 @@ json.dump({"movements": 1, "currency": "EUR", "entries": entries}, open(path, "w
 PY
 
 step "3. the owner proves everything once (the first snapshot in $WALLET, at the night before: here the tip)"
-$AUDIT init -w demo/watch          # bip322.toml in $BIP322_DIR (holder = "demo") and the wallet directory demo/watch/
+$AUDIT init -w demo/watch          # bip322.toml in $BIP322_DIR, demo/holder.toml, and the wallet directory demo/watch/
 sign_snapshot "$(run $AUDIT --cli "$CLI" -w watch snapshot)"   # the message: Proof of control, demo, <date>
 
 step "4. a payment is prepared; before broadcasting, the change address is proven (a snapshot joins the others)"

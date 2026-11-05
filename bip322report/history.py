@@ -175,6 +175,11 @@ class History:
     def balance_at(self, height: int) -> int:
         return sum(c.amount_sat for c in self.coins_at(height))
 
+    def addresses(self) -> set[str]:
+        """Every address of the wallet's that a transaction paid or spent from: what names the wallet as the other side of someone
+        else's movement, without asking its node."""
+        return {c.address for tx in (*self.txs, *self.pending) for c in (*tx.ours_out, *tx.ours_in) if c.address}
+
     def between(self, start_height: int, end_height: int) -> list[WalletTx]:
         """Confirmed transactions with ``start_height < height <= end_height``."""
         return [tx for tx in self.txs if tx.height is not None and start_height < tx.height <= end_height]

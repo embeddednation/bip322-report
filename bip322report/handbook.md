@@ -83,9 +83,9 @@ moment it exists, so `bip322 init -w company/treasury` makes the first and
 wallets before any proof is taken. A wallet's name is unique in the tree, so
 `-w NAME` finds it under whichever holder it is; a wallet the audit commands
 make themselves goes under the holder `-w KEY/NAME` names, else the holder
-whose directory the command runs in, else `holder` in `bip322.toml`, else
-the tree's one holder. The statement takes the holder the same way, from
-the word after the options, the directory, the file, or the tree.
+whose directory the command runs in, else the tree's one holder. The
+statement takes the holder the same way, from the word after the options,
+the directory, or the tree.
 The snapshots hold the PSBTs, which carry the wallet's xpubs: they stay with
 the holder, and are backed up like the wallet's own records. The statements
 are what leaves. Versions before bip322-audit 0.22 kept a wallet's snapshots
@@ -93,51 +93,60 @@ under `<wallet>/snapshots/` and its own statements beside them; such a
 directory is refused with the `mv` that moves the snapshots up, and the old
 statements are simply no longer read.
 
-In `bip322.toml`, top-level keys are defaults for every wallet, a
-`[holders.KEY]` table overrides them for the holder's wallets, a
-`[wallets.NAME]` table for one, and the command line beats all:
+Two files hold the settings. The tree's `bip322.toml` holds what is common
+to every holder: the node, the looks, the dust, the addresses of others. A
+holder's `holder.toml`, in its directory, holds what is the holder's: its
+`name`, a `[wallets.NAME]` table per wallet that needs one, its written-off
+coins, and any common key it overrides. The statement reads the two as one,
+the holder's winning, a wallet's table over both, and the command line over
+all:
 
 ```toml
-holder = "company"                  # the default holder: a new -w NAME is made in its directory
+# bip322.toml
+cli = "bitcoin-cli"                 # how to reach the node
 dust = 1000                         # satoshi; see --dust
 
-[holders.company]
+[addresses]
+"bc1q…" = "Exchange"                # an address of theirs: the wallet it belongs to
+
+# company/holder.toml
 name = "Company AB (556123-4567)"   # the statements' header, and the signed message: Proof of control, Company AB (556123-4567), <date>
 
 [wallets.treasury]
 node = "treasury-2of3-main"         # the node wallet, when its name is not the directory's
-
-[addresses]
-"bc1q…" = "Exchange"                # an address of theirs: the wallet it belongs to
 ```
 
-`bip322 init -w company/treasury` writes the file with every key shown, all
-but `holder` and the two tables as comments to switch on, and makes the
-directories `company/treasury/`.
+`bip322 init -w company/treasury` writes both files with every key shown as
+a comment to switch on, the wallet's table switched on, and makes the
+directories `company/treasury/`; in a tree already, it adds the holder.
 
 The holder's `name` is one string used twice: the statement's header, and
 the message every proof signs, `Proof of control, <name>, <date>` over the
 stamp line, so that what is stated and what is signed cannot drift apart.
 It must be printable ASCII for the signing devices; `bip322 audit snapshot
---text` gives one snapshot another message. The keys `wallet` and `text` of
-earlier versions are no longer read, and a file that still has them is told.
+--text` gives one snapshot another message. Without a `name`, the directory's
+name is the holder's. The keys `wallet`, `text` and `holder` of earlier
+versions are no longer read, and a file that still has them is told; the
+`[holders.KEY]` tables of earlier versions are refused, with where their
+keys go.
 
-Other keys: `cli` (how to reach the node), `timeout`, `theme`, `heading`,
-`explorer`. The statement's own settings, `dust`, `theme`, `heading` and
-`explorer`, are read from `[holders.KEY]` and the top level, not from a
-wallet's table, which carries what is read per wallet (`node`, `cli`); the
-statement says so when it finds one there. `history` and `balance` take the
-wallet from `-w`, else the wallet directory they run in, else the node's one
-loaded wallet.
+Other keys: `timeout`, `theme`, `heading`, `explorer`. The statement's own
+settings, `dust`, `theme`, `heading` and `explorer`, are read from the
+holder's file and the tree's, not from a wallet's table, which carries what
+is read per wallet (`node`, `cli`); the statement says so when it finds one
+there. `history` and `balance` take the wallet from `-w`, else the wallet
+directory they run in, else the node's one loaded wallet.
 The other side of a movement, the statement's `wallet` column, is named by
 its addresses: a send by the addresses it paid, a receive by the addresses it
 came from, which the node reads from the block (Bitcoin Core 25 or later, no
 `txindex` needed). A wallet of the tree, the holder's own or another
-holder's, names its addresses itself: its node is asked which are its, so a
-move between two wallets needs no entry anywhere. A movement to or from an
-account the holder keeps a record for (below) is named by that account's own
-record. `[addresses]` names the rest, a payee's say. An address nothing names
-leaves the cell empty, and the summary counts such movements.
+holder's, names its addresses itself: its kept history says which addresses
+it used, and a wallet loaded on its node is asked about the rest, so a move
+between two wallets needs no entry anywhere and a wallet no longer loaded
+still names its own. A movement to or from an account the holder keeps a
+record for (below) is named by that account's own record. `[addresses]`
+names the rest, a payee's say. An address nothing names leaves the cell
+empty, and the summary counts such movements.
 
 ### The holder's statement
 
@@ -164,11 +173,11 @@ finalize` would, then builds the statement. The date is given once; the
 block is never typed.
 
 A holder is a directory of the tree, and its wallets are the wallet
-directories under it; `[holders.KEY]` in `bip322.toml` gives the name the
-statement puts in its header, else the directory's name is it, and any
-other key there is a default for the holder's wallets. The holder
-may be left off the command inside its directory, with `holder = KEY` in
-`bip322.toml`, or when the tree has one holder. The wallets' histories merge: a transaction that moves coins from one of the holder's
+directories under it; `name` in its `holder.toml` is the name the statement
+puts in its header, else the directory's name is it, and any other key
+there is the holder's setting. The holder may be left off the command
+inside its directory, or when the tree has one holder. The wallets'
+histories merge: a transaction that moves coins from one of the holder's
 wallets to another is one movement of kind `transfer`, its fee the only
 cost, and the balance is the holder's total; the first page lists each
 wallet's share under the opening holdings and above the closing ones, and the
@@ -280,11 +289,11 @@ bip322 audit verify -w treasury       # what the auditor will run on the proofs 
 snapshot the statement is not about.
 
 The audit commands take the wallet from `-w`, else from the wallet directory
-they run in, else from `bip322.toml`, else from the node; `finalize` and
+they run in, else from the tree, else from the node; `finalize` and
 `verify` take a snapshot's name (`finalize 2026-12-31-931871`) or a path when
 the newest is not the one meant. `bip322 report` takes the holder: the word
-after the options, else the holder whose directory it runs in, else `holder`
-in `bip322.toml`, else the tree's one.
+after the options, else the holder whose directory it runs in, else the
+tree's one.
 
 `bip322 report` reads each wallet's history from the node, verifies every
 proofs file in the wallets' directories against the node, picks for each
@@ -406,7 +415,7 @@ year-end snapshot gives the change a proof at the closing block, and until
 then the statement shows the change UTXO as proven before it.
 
 **Lost keys.** A coin whose keys are gone is on the chain for ever and can
-never be proven. Write it off, as the books do, in `bip322.toml`:
+never be proven. Write it off, as the books do, in the holder's `holder.toml`:
 
 ```toml
 [written_off]

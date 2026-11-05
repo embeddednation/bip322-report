@@ -104,6 +104,8 @@ class FakeNode(BitcoinCli):
             return {"subversion": "/Satoshi:31.1.0/"}
         if method == "getwalletinfo":
             return {"walletname": self.wallet_name}
+        if method == "listwallets":
+            return [self.wallet_name]
         if method == "listdescriptors":  # the wallet behind the node wallet, when a test gave the node its descriptor
             if not self.descriptor:
                 raise RpcError("Wallet file not specified")

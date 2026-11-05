@@ -468,7 +468,7 @@ def test_wallet_and_dir_go_before_or_after_any_command(bundles, wallet, run, tmp
     code, out, err = run(node, "report", *HEIGHTS, "--dir", elsewhere)
     assert code == 0 and "RESULT: OK" in err and out.strip() == str(elsewhere / "h" / "statements" / "979..1000")
     assert _written(out.strip(), ".json").name == f"{STEM}.json" and (elsewhere / "h" / "watch" / "history.json").is_file()
-    assert [p.name for p in (tmp_path / "bip322").iterdir()] == ["bip322.toml"]  # nothing written to BIP322_DIR
+    assert sorted(p.name for p in (tmp_path / "bip322").iterdir()) == ["bip322.toml", "h"]  # nothing written to BIP322_DIR
     code, _, err = run(node, "--dir", elsewhere, "report", *HEIGHTS)
     assert code == 2 and "exists and is not empty" in err  # the same place, found again
     code, _, err = run(node, "-w", "watch", "--dir", elsewhere, "report", *HEIGHTS, "-o", "w")
@@ -480,19 +480,22 @@ def test_wallet_and_dir_go_before_or_after_any_command(bundles, wallet, run, tmp
 
 
 def test_the_sample_config_names_a_theme_and_a_heading_style_that_exist():
-    """bip322 init writes bip322-audit's sample; the theme and heading it suggests must be ones this package renders."""
-    from bip322audit.datadir import sample_config
+    """bip322 init writes bip322-audit's samples; the theme and heading they suggest must be ones this package renders."""
+    from bip322audit.datadir import sample_config, sample_holder_config
 
-    data = tomllib.loads(re.sub(r"^# (?=[a-z]+ = |\[)", "", sample_config(), flags=re.M))
-    assert data["theme"] == cli_module.DEFAULT_THEME in cli_module.THEMES and data["heading"] in cli_module.HEADINGS
-    assert set(data["wallets"]) == {"treasury", "personal"} and tomllib.loads(sample_config()) == {}
+    for sample in (sample_config(), sample_holder_config()):
+        data = tomllib.loads(re.sub(r"^# (?=[a-z]+ = |\[|\")", "", sample, flags=re.M))
+        assert data["theme"] == cli_module.DEFAULT_THEME in cli_module.THEMES and data["heading"] in cli_module.HEADINGS
+        assert tomllib.loads(sample) == {}
+    assert set(data["wallets"]) == {"treasury", "cold"} and list(data["written_off"].values())[0]["reason"] == "keys lost"
 
 
 def test_inside_a_wallets_directory_its_holder_is_meant(bundles, wallet, run, tmp_path, monkeypatch):
     """Run in h/books/ (not the node wallet's name), the statement is h's, over books; no holder named, no asking the node."""
     node = _node(wallet, tip=1000)
     _place(bundles, tmp_path / "bip322" / "h" / "books" / "full", "full")
-    (tmp_path / "bip322" / "bip322.toml").write_text("")  # no default holder either: the directory says
+    (tmp_path / "bip322" / "jonas").mkdir()
+    (tmp_path / "bip322" / "jonas" / "holder.toml").write_text("")  # a second holder: the directory says which is meant
     monkeypatch.chdir(tmp_path / "bip322" / "h" / "books")
     code, out, err = run(node, "report", *HEIGHTS)
     assert code == 0 and out.strip() == str(tmp_path / "bip322" / "h" / "statements" / "979..1000")
@@ -511,7 +514,7 @@ def test_the_addresses_table_names_the_other_side_in_the_csv(wallet, run, tmp_pa
     node.add("bb" * 32, 995, [("aa" * 32, 0)], [(exchange, 30_000), (a1, 69_000)])
     data_dir = Path(os.environ["BIP322_DIR"])
     _member(node)
-    (data_dir / "bip322.toml").write_text(f'holder = "h"\n\n[addresses]\n"{exchange}" = "Exchange"\n')
+    (data_dir / "bip322.toml").write_text(f'[addresses]\n"{exchange}" = "Exchange"\n')
     code, out, err = run(node, "report", "--from-height", "980", "--to-height", "1000", "-o", "named")
     assert code == 1 and "ATTENTION" in err  # no proofs: the statement is written all the same
     rows = list(csv.DictReader(_written("named", ".csv").open()))  # one wallet: the rows alone, no block above them
@@ -520,19 +523,25 @@ def test_the_addresses_table_names_the_other_side_in_the_csv(wallet, run, tmp_pa
         ("receive", "0.00100000", "0.00100000", "Exchange"),
         ("send", "-0.00031000", "0.00069000", "Exchange"),
     ]
-    (data_dir / "bip322.toml").write_text('holder = "h"\n\n[addresses]\n"bc1q" = 3\n')
+    (data_dir / "h" / "holder.toml").write_text('[addresses]\n"bc1q" = 3\n')
     code, out, err = run(node, "report", "--from-height", "980", "--to-height", "1000", "-o", "bad")
     assert code == 2 and "[addresses] must map each address to the name of the wallet" in err and not Path("bad").exists()
 
 
 def test_the_statement_header_names_the_holder(wallet, run, tmp_path):
-    """The holder is the directory the wallets are under; [holders.KEY] name is the header, else the key."""
+    """The holder is the directory the wallets are under; name in its holder.toml is the header, else the directory's name.
+    The tables of earlier versions in bip322.toml are refused, its default holder noted."""
     node = _node(wallet, tip=1000)
     data_dir = Path(os.environ["BIP322_DIR"])
     _member(node)
-    (data_dir / "bip322.toml").write_text('[holders.h]\nname = "Company AB"\n')
+    (data_dir / "h" / "holder.toml").write_text('name = "Company AB"\n')
     run(node, "report", *HEIGHTS, "-o", "named")
     assert json.loads(_written("named", ".json").read_text())["label"] == "Company AB"
-    (data_dir / "bip322.toml").write_text("")
-    run(node, "report", *HEIGHTS, "-o", "bare")
+    (data_dir / "h" / "holder.toml").write_text("")
+    (data_dir / "bip322.toml").write_text('holder = "h"\n')
+    code, out, err = run(node, "report", *HEIGHTS, "-o", "bare")
     assert json.loads(_written("bare", ".json").read_text())["label"] == "h"
+    assert f"note: holder in {data_dir / 'bip322.toml'} is no longer read: the holder is -w KEY/NAME, the word after the options" in err
+    (data_dir / "bip322.toml").write_text('[holders.h]\nname = "Company AB"\n')
+    code, out, err = run(node, "report", *HEIGHTS, "-o", "refused")
+    assert code == 2 and "[holders.KEY] tables are no longer read: a holder's keys go in KEY/holder.toml" in err

@@ -84,22 +84,24 @@ bip322 report company
 ```
 
 The holder is the word after the options, else the holder whose directory the
-command runs in, else `holder` in `bip322.toml`, else the tree's one; `-o DIR`
-writes the statement elsewhere, `--dir DIR` names the data directory from
-elsewhere; `-w NAME` names a wallet for `history` and `balance`. The tree and the configuration file are described in bip322-audit's README and the
-handbook; the keys this package reads are `holder`, `wallet`, `cli`,
-`dust`, `theme`, `heading`, `explorer`, `node` per wallet, `name` per holder, and the
-`[addresses]` table: the wallet each address of someone else belongs to
-(`"bc1q..." = "Exchange"`), which names the other side of a movement; the
-wallets of the tree name their own addresses, so a move between two of them
-needs no entry. The statement's own settings, `dust`, `theme`, `heading` and
-`explorer`, come from `[holders.KEY]` and the top level, not from a wallet's
-table, which carries what is read per wallet (`node`, `cli`); the statement
-says so when it finds one there.
+command runs in, else the tree's one; `-o DIR` writes the statement
+elsewhere, `--dir DIR` names the data directory from elsewhere; `-w NAME`
+names a wallet for `history` and `balance`. The tree and its two files, the
+tree's `bip322.toml` and each holder's `holder.toml`, are described in
+bip322-audit's README and the handbook; the keys this package reads are
+`cli`, `dust`, `theme`, `heading`, `explorer`, `node` per wallet, the
+holder's `name` and `[written_off]`, and the `[addresses]` table: the wallet
+each address of someone else belongs to (`"bc1q..." = "Exchange"`), which
+names the other side of a movement; the wallets of the tree name their own
+addresses, from their kept histories and their node, so a move between two of
+them needs no entry. The statement's own settings, `dust`, `theme`, `heading`
+and `explorer`, come from the holder's file and the tree's, not from a
+wallet's table, which carries what is read per wallet (`node`, `cli`); the
+statement says so when it finds one there.
 A holder is a directory of the tree with its wallets' directories under it;
-`[holders.KEY]` gives its `name` for the statement's header, and any other
-key there (`dust`, `theme`, …) is a default for the holder's wallets, between
-the wallet's own table and the top level. The statement merges the wallets'
+`name` in its `holder.toml` is the statement's header, and any other key
+there (`dust`, `theme`, …) is the holder's, over the tree's file and under
+the wallet's own table. The statement merges the wallets'
 histories into one, a transfer between two of them one movement of kind
 `transfer`, the balance the holder's total, each wallet's share under the
 opening and the closing holdings on the first page and its movements a block
@@ -193,7 +195,7 @@ totals, right-aligned tabular figures with all eight decimals, a running
 balance in the movements table, a reference number on every page, and a
 section on the basis of preparation and its limitations (point in time,
 control is not title, completeness rests on the holder's representation).
-The holder is named as `[holders.KEY]` says, else by its directory. Sections 1 and 2 are kept whole when they fit on a page.
+The holder is named as `name` in its `holder.toml` says, else by its directory. Sections 1 and 2 are kept whole when they fit on a page.
 A holder of several wallets gets each wallet's share on the first page and a
 block of movements per wallet; a holder of one wallet the same document
 without the split.

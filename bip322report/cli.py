@@ -22,14 +22,17 @@ import bip322audit.cli as audit_cli
 from bip322audit.audit import AuditError
 from bip322audit.datadir import (
     HISTORY_FILE,
+    HOLDER_FILE,
     SNAPSHOT_FILE,
     Config,
     ConfigError,
     find_data_dir,
     holder_dir,
     holder_of_cwd,
+    holder_of_wallet,
     holder_statements_dir,
     holders,
+    load_config,
     name_wallet,
     proofs_file_in,
     use_data_dir,
@@ -66,7 +69,7 @@ def _opt(args, name: str):
     return getattr(args, f"{name}_sub", None) or getattr(args, name, None)
 
 
-def _wallet_name(args, config: Config) -> str | None:
+def _wallet_name(args) -> str | None:
     """The wallet as named by the owner: ``-w``, else the wallet directory the command runs in; None when neither says."""
     given = _opt(args, "wallet")
     if given:
@@ -144,17 +147,53 @@ def _cli(args, config: Config, wallet: str | None, *, rpcwallet: bool = True) ->
     return cli
 
 
-def _setting(args, config: Config, name: str, key: str, wallet: str | None, default=None, *, holder: str | None = None):
-    """An option's value: the command line, else bip322.toml (the wallet's table, its holder's, then the top level), else ``default``."""
+def _setting(args, config: Config, name: str, key: str, wallet: str | None, default=None):
+    """An option's value: the command line, else the files (the wallet's table, the holder's, then the tree's), else ``default``."""
     given = getattr(args, name, None)
-    return given if given is not None else config.get(key, wallet, default, holder=holder)
+    return given if given is not None else config.get(key, wallet, default)
+
+
+def _loaded(args, names: list[str]) -> dict[str, BitcoinCli]:
+    """Of these wallets of the tree, those loaded on their node, each with its node wallet's cli; ``listwallets`` is asked once per
+    node, under each wallet's own holder's settings."""
+    configs: dict[str | None, Config] = {}
+    loaded_on: dict[tuple[str, ...], set[str]] = {}
+    found = {}
+    for w in names:
+        key = holder_of_wallet(w)
+        if key not in configs:
+            configs[key] = Config.load(key)
+        node = _cli(args, configs[key], w, rpcwallet=False)
+        if tuple(node.argv) not in loaded_on:
+            try:
+                loaded_on[tuple(node.argv)] = {str(n) for n in node.call("listwallets")}
+            except RpcError as exc:
+                _progress(f"{w}'s node: {exc}; its wallets are not asked")
+                loaded_on[tuple(node.argv)] = set()
+        if configs[key].node_wallet(w) in loaded_on[tuple(node.argv)]:
+            found[w] = _cli(args, configs[key], w)
+    return found
 
 
 def _names(args, config: Config, history: History, period: Period, own: list[str]) -> dict[str, str]:
-    """The other side of the period's movements named: ``[addresses]``, else the wallet of the tree whose node says the address is
-    its own; ``own`` are the statement's wallets, whose addresses need no name."""
-    others = {w: _cli(args, config, w) for w in wallets() if w not in own}
-    return name_by_wallets(counterparts(history.between(period.start.height, period.end.height)), config.addresses, others, _progress)
+    """The other side of the period's movements named: ``[addresses]``, else the wallet of the tree whose kept history used the
+    address, else the wallet, loaded on its node, whose node says the address is its own; ``own`` are the statement's wallets, whose
+    addresses need no name."""
+    addresses = counterparts(history.between(period.start.height, period.end.height))
+    known = dict(config.addresses)
+    others = sorted(w for w in wallets() if w not in own)
+    for w in others:  # the kept histories first: every address the wallet ever used, loaded or not, no node asked
+        path = wallet_dirs()[w] / HISTORY_FILE
+        if path.is_file():
+            try:
+                used = History.load(path).addresses()
+            except (OSError, ValueError, KeyError, TypeError):
+                _progress(f"{w}: {path.name} is not readable; its addresses are named by the node, if loaded")
+                continue
+            for address in addresses & used:
+                known.setdefault(address, w)
+    unknown = [a for a in addresses if a not in known]
+    return name_by_wallets(addresses, known, _loaded(args, others) if unknown else {}, _progress)
 
 
 def _add_node_args(p: argparse.ArgumentParser, *, wallet: bool = True) -> None:
@@ -233,8 +272,8 @@ def _check_history(cli: BitcoinCli, history: History, source: str) -> None:
         )
 
 
-def _theme(args, config: Config, wallet: str | None, *, holder: str | None = None) -> str:
-    theme = str(_setting(args, config, "theme", "theme", wallet, DEFAULT_THEME, holder=holder))
+def _theme(args, config: Config, wallet: str | None) -> str:
+    theme = str(_setting(args, config, "theme", "theme", wallet, DEFAULT_THEME))
     if theme not in THEMES:
         raise CLIError(f"theme {theme!r} is not one of {', '.join(THEMES)}")
     return theme
@@ -321,15 +360,15 @@ def _pdf_possible() -> bool:
 
 
 def cmd_block(args) -> int:
-    cli = _cli(args, Config.load(), None)
+    cli = _cli(args, load_config(), None)
     found = last_block_before(cli, parse_when(args.when))
     emit(json.dumps(found.to_dict(), indent=2), args.output)
     return 0
 
 
 def cmd_history(args) -> int:
-    config = Config.load()
-    wallet = _wallet_name(args, config)
+    wallet = _wallet_name(args)
+    config = load_config(wallet)
     history = fetch_history(_cli(args, config, wallet), progress=_progress)
     if wallet is None and history.wallet is not None:
         wallet = config.wallet_of_node(str(history.wallet))
@@ -353,8 +392,9 @@ def cmd_history(args) -> int:
 
 
 def cmd_balance(args) -> int:
-    config = Config.load()
-    cli = _cli(args, config, _wallet_name(args, config))
+    wallet = _wallet_name(args)
+    config = load_config(wallet)
+    cli = _cli(args, config, wallet)
     history = _history(args, cli)
     if args.height is not None:
         at = block(cli, args.height) if not args.history else None
@@ -393,8 +433,8 @@ def _rates(args) -> Rates | None:
     return None
 
 
-def _dust(args, config: Config, wallet: str | None, *, holder: str | None = None) -> int:
-    dust = _setting(args, config, "dust", "dust", wallet, 0, holder=holder)
+def _dust(args, config: Config, wallet: str | None) -> int:
+    dust = _setting(args, config, "dust", "dust", wallet, 0)
     if not isinstance(dust, int) or isinstance(dust, bool):
         raise CLIError(f"dust must be a number of satoshi, not {dust!r}")
     if dust < 0:
@@ -405,11 +445,11 @@ def _dust(args, config: Config, wallet: str | None, *, holder: str | None = None
 
 
 def _written_off(config: Config, cli: BitcoinCli, history: History) -> list[WriteOff]:
-    """``[written_off]`` in bip322.toml: ``"TXID:VOUT" = { date = "YYYY-MM-DD", reason = "…" }``, each resolved to the first block
-    of that day on the node (the block after the last one before the instant), which must be in the history."""
+    """``[written_off]`` in the holder's file: ``"TXID:VOUT" = { date = "YYYY-MM-DD", reason = "…" }``, each resolved to the first
+    block of that day on the node (the block after the last one before the instant), which must be in the history."""
     table = config.data.get("written_off") or {}
     if not isinstance(table, dict):
-        raise CLIError('[written_off] in bip322.toml must be a table: "TXID:VOUT" = { date = "YYYY-MM-DD", reason = "…" }')
+        raise CLIError(f'[written_off] in {HOLDER_FILE} must be a table: "TXID:VOUT" = {{ date = "YYYY-MM-DD", reason = "…" }}')
     out = []
     for key, value in table.items():
         txid, sep, vout = str(key).partition(":")
@@ -461,15 +501,17 @@ def cmd_report(args) -> int:
         raise CLIError(
             "the statement is the holder's, over every wallet under it: bip322 report [HOLDER]; -w names a wallet for history and balance"
         )
-    config = Config.load()
     found = holders()
-    key = args.key or holder_of_cwd() or config.default_holder
+    key = args.key or holder_of_cwd()
     if key is None:
         if len(found) != 1:
             raise CLIError(
                 "which holder? bip322 report HOLDER" + (f" (holders here: {', '.join(found)})" if found else ": none in the tree yet")
             )
         key = found[0]
+    config = Config.load(key)  # the tree's settings with the holder's over them
+    for line in config.stale():
+        _progress(f"note: {line}")
     paths = {w: p for w, p in wallet_dirs().items() if p.parent.name == key} if key in found else {}  # the tree, read once
     members = sorted(paths)
     if not members:
@@ -481,7 +523,7 @@ def cmd_report(args) -> int:
         stray = [k for k in STATEMENT_KEYS if k in config.wallets.get(w, {})]
         if stray:
             _progress(
-                f"note: {', '.join(stray)} in [wallets.{w}] is not read by the statement, which is the holder's: set it in [holders.{key}]"
+                f"note: {', '.join(stray)} in [wallets.{w}] is not read by the statement, which is the holder's: set it in {key}/{HOLDER_FILE}"
             )
     period_label = _period_label(args) if _period_given(args) else None
     try:
@@ -490,9 +532,9 @@ def cmd_report(args) -> int:
         raise CLIError(str(exc)) from exc
     for account in accounts:
         _progress(f"{account.name}: {len(account.entries)} movements on record")
-    dust = _dust(args, config, None, holder=key)
+    dust = _dust(args, config, None)
     rates = _rates(args)
-    theme = _theme(args, config, None, holder=key)
+    theme = _theme(args, config, None)
     pdf = not args.html and _pdf_possible()
     roots = _proofs_roots(args, [paths[w] for w in members])  # a given path is checked before any work
     if args.prove:
@@ -521,7 +563,7 @@ def cmd_report(args) -> int:
     report = build_report(
         history,
         period,
-        label=config.holder_name(key),
+        label=config.name,
         proofs_roots=roots,
         cli=cli,
         rates=rates,
@@ -554,10 +596,10 @@ def _write_statement(
     if not args.no_proofs and roots:
         _copy_proofs(report, roots, directory)
     print(format_summary(report), file=sys.stderr)
-    explorer = _setting(args, config, "explorer", "explorer", None, holder=holder)
+    explorer = _setting(args, config, "explorer", "explorer", None)
     if explorer is None:
         explorer = EXPLORER if chain == "main" else None
-    heading = _setting(args, config, "heading", "heading", None, holder=holder)
+    heading = _setting(args, config, "heading", "heading", None)
     if pdf:  # last: should the rendering fail, everything else is in place
         write_pdf(render_html(report, explorer=explorer, theme=theme, heading=heading, fonts_url=PACKAGE_FONTS), directory / f"{stem}.pdf")
         write_pdf(render_history_html(report, theme=theme, heading=heading, fonts_url=PACKAGE_FONTS), directory / f"{stem}-history.pdf")
@@ -721,8 +763,8 @@ def build_parser() -> argparse.ArgumentParser:
             "transaction to the last block before today "
             "00:00 UTC, the night before, labelled by that block's date; a period whose end lies ahead closes there too. That is the "
             "block bip322 audit snapshot stamps by default, so a snapshot and a statement of the same day agree. "
-            "HOLDER is a directory of the tree, and may be left out inside its directory, with holder = KEY in bip322.toml, or when "
-            "the tree has one holder; [holders.KEY] in bip322.toml gives its name for the header. "
+            "HOLDER is a directory of the tree, and may be left out inside its directory or when the tree has one holder; name in "
+            "its holder.toml is the header's. "
             "The files go to <holder>/statements/<label>/ in the data directory, named <holder>-<label>.pdf (.html where WeasyPrint is "
             "not installed, or with --html), .json, .csv (one block per wallet, as that wallet sees the movements), and a copy of each "
             "proofs file the statement cites, under its own name. "

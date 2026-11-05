@@ -1,7 +1,7 @@
 """The holder's statement: several wallets' histories as one.
 
 A holder is a directory of the tree, its wallets the wallet directories under
-it; ``[holders.KEY]`` in bip322.toml gives its name.  Their histories merge by txid: a transaction that is a send in one wallet and a
+it; ``name`` in its holder.toml is its name.  Their histories merge by txid: a transaction that is a send in one wallet and a
 receive in another is one movement between them (kind ``transfer``), its fee
 exact, and every coin knows its wallet.  The statement goes to
 ``KEY/statements/<label>/`` in the data directory, named for the holder.
