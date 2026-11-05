@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.41.0 (2026-11-05)
+
+The moves between the wallets and the holder's own accounts are one line
+on the first page, their net ("From the holder's accounts, net", or "To"
+when more went out), the withdrawals and deposits behind it with their sums
+beside it: round trips through the holder's exchange accounts no longer
+read as large receipts and payments. Totals gain `accounts_net_*`; the
+gross `from_accounts_*` and `to_accounts_*` stay.
+
 ## 0.40.0 (2026-11-05)
 
 The first page tells what moved to and from the holder's own accounts apart

@@ -83,14 +83,14 @@ def test_a_record_names_the_other_side_by_the_accounts_own_record(tmp_path, wall
     html = render_html(report)
     assert html.count("bitstamp") >= 2 and "W-777" in html and "D-501" in html and "bitstamp 2 of 2" in html  # ATTENTION: no proofs here
     assert "is named by that account's own record of it, kept with the holder (bitstamp: raw/x.json, sha256 abababababababab…)" in html
-    assert (
-        'Received from the holder\'s accounts</td><td class="num">0.50000000' in html
-        and "1 withdrawal by the accounts' own records" in html
+    assert 'From the holder\'s accounts, net</td><td class="num">0.30000000' in html  # the net on the column, the gross beside it
+    assert "1 withdrawal 0.50000000, 1 deposit 0.20000000, by the accounts' own records" in html
+    assert "the summary shows the net of those moves" in html
+    assert "the holder's accounts, net" not in render_html(build_report(history, period, label="T"))
+    out_more = render_html(
+        build_report(history, period, label="T", accounts=[Account.load(_record(tmp_path / "o" / "movements.json", _entries()[1:]), "o")])
     )
-    assert 'Sent to the holder\'s accounts</td><td class="num">(0.20000000)' in html and "1 deposit by the accounts' own records" in html
-    assert "counted apart from others" in html and "Received from the holder's accounts" not in render_html(
-        build_report(history, period, label="T")
-    )
+    assert 'To the holder\'s accounts, net</td><td class="num">(0.20000000)' in out_more and "1 deposit 0.20000000, by" in out_more
     assert "bitstamp" in render_history_html(report) and "W-777" not in render_history_html(report)  # the reader gets the name, not the id
     write_csv(report, tmp_path / "t.csv")
     assert ",bitstamp\n" in (tmp_path / "t.csv").read_text()  # the wallet column, last

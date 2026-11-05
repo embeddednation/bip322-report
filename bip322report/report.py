@@ -505,14 +505,14 @@ def _movement_rows(
     endpoints: Mapping[str, dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """The period's transactions as rows with a running balance and the other side named, and the totals of the period:
-    received from others, received from the holder's own accounts (a movement an account's record matches counts whole as
-    such), sent to others, sent to the holder's accounts, fees, the net of joint transactions, each in fiat too when rates
-    were given (``totals["fiat"]``; None for a sum some rate was missing for).  For a holder (``holder``) each row also
-    names the wallet of the holder's it touched."""
+    received from others, sent to others, moved from and to the holder's own accounts (a movement an account's record
+    matches counts whole as such; the two gross sums and their net, ``accounts_net``, which is what the first page shows),
+    fees, the net of joint transactions, each in fiat too when rates were given (``totals["fiat"]``; None for a sum some
+    rate was missing for).  For a holder (``holder``) each row also names the wallet of the holder's it touched."""
     rows = []
     received = sent = fees = mixed = mixed_count = lost = lost_count = 0
     from_accounts = from_count = to_accounts = to_count = 0
-    valued = dict.fromkeys(("received", "from_accounts", "sent", "to_accounts", "fees", "mixed", "written_off"), Decimal(0))
+    valued = dict.fromkeys(("received", "from_accounts", "sent", "to_accounts", "accounts_net", "fees", "mixed", "written_off"), Decimal(0))
     unvalued = False
     running = opening_sat
     for tx in movements:
@@ -569,6 +569,7 @@ def _movement_rows(
                 valued["fees"] += Decimal(row["fiat"]["fee"])
     amount_sat = received + from_accounts - sent - to_accounts + mixed - lost  # the sum of the rows' amounts: an internal move's is zero
     net_sat = running - opening_sat
+    valued["accounts_net"] = valued["from_accounts"] - valued["to_accounts"]
     totals = {
         "received_sat": received,
         "received_btc": btc(received),
@@ -580,6 +581,8 @@ def _movement_rows(
         "to_accounts_sat": to_accounts,
         "to_accounts_btc": btc(to_accounts),
         "to_accounts_count": to_count,
+        "accounts_net_sat": from_accounts - to_accounts,
+        "accounts_net_btc": btc(from_accounts - to_accounts),
         "mixed_sat": mixed,
         "mixed_btc": btc(mixed),
         "mixed_count": mixed_count,

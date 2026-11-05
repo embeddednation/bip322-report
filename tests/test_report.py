@@ -115,6 +115,7 @@ def test_report_backs_every_closing_coin_with_a_verified_proof(tmp_path, wallet,
     assert report["reconciliation"]["ok"] and report["totals"] == {
         "received_sat": 0, "received_btc": "0.00000000", "from_accounts_sat": 0, "from_accounts_btc": "0.00000000", "from_accounts_count": 0,
         "sent_sat": 20_000_000, "sent_btc": "0.20000000", "to_accounts_sat": 0, "to_accounts_btc": "0.00000000", "to_accounts_count": 0,
+        "accounts_net_sat": 0, "accounts_net_btc": "0.00000000",
         "mixed_sat": 0, "mixed_btc": "0.00000000", "mixed_count": 0, "amount_sat": -20_000_000, "amount_btc": "-0.20000000",
         "fees_sat": 1_100_000, "fees_btc": "0.01100000", "net_sat": -21_100_000, "net_btc": "-0.21100000", "transactions": 2,
         "written_off_sat": 0, "written_off_btc": "0.00000000", "written_off_count": 0, "fiat": None,

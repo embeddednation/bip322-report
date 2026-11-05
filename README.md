@@ -201,9 +201,10 @@ block of movements per wallet; a holder of one wallet the same document
 without the split.
 
 * Period: the instants asked for and the two blocks they resolved to.
-* First, the summary: the opening holdings, what was received from others
-  and from the holder's own accounts, sent to others and to those accounts
-  (by the accounts' records), paid in fees, and the closing holdings, in BTC and, when
+* First, the summary: the opening holdings, what was received from others,
+  sent to others, moved from or to the holder's own accounts on balance
+  (by the accounts' records, the withdrawals and deposits behind the net
+  beside it), paid in fees, and the closing holdings, in BTC and, when
   rates are given, in the currency, the two holdings at the rate of their
   day. The opening line cites the statement in the tree that closed at this
   one's opening block, by label and reference, in red when its closing
