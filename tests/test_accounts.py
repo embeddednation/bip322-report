@@ -119,6 +119,17 @@ def test_an_entry_no_wallet_saw_or_an_amount_that_disagrees_is_attention(tmp_pat
     # the same record in a period that holds none of it: nothing to say, nothing failed
     early = build_report(history, period_for_heights(node, 979, 985), label="T", accounts=[account])
     assert early["endpoints"]["ok"] and early["endpoints"]["accounts"][0]["in_period"] == 0
+    # an entry without a txid (an export that carries none): unmatched in its period, matched to nothing, never "between"
+    bare = [{"kind": "withdrawal", "time_utc": _iso(1000), "txid": None, "amount_sat": 7_000_000, "reference": "W-901"}]
+    one = Account.load(_record(tmp_path / "one" / "movements.json", bare), "one")
+    two = Account.load(_record(tmp_path / "two" / "movements.json", [{**bare[0], "kind": "deposit"}]), "two")
+    assert one.entries[0].txid is None
+    report = build_report(history, period, label="T", accounts=[one, two])
+    rows = report["endpoints"]["accounts"]
+    assert [(a["in_period"], a["matched"], len(a["unmatched"]), a["between"]) for a in rows] == [(1, 0, 1, []), (1, 0, 1, [])]
+    assert "UNMATCHED 1: withdrawal 0.07000000 BTC 2023-11-21 (W-901) without a txid" in format_summary(report)
+    assert "one records a withdrawal of 0.07000000 on 2023-11-21 (W-901) without the transaction it was." in render_html(report)
+    assert build_report(history, period_for_heights(node, 979, 985), label="T", accounts=[one])["endpoints"]["ok"]
 
 
 def test_the_statement_reads_the_holders_accounts_from_the_tree_and_refuses_a_broken_one(tmp_path, wallet, monkeypatch, capsys):

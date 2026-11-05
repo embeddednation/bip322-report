@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.39.0 (2026-11-05)
+
+An entry of a movements file may carry `"txid": null`, for a record that
+has no transaction id to give (an export without txids): it matches nothing
+and, dated in the period, stands as an unmatched entry, "without the
+transaction it was", until the holder fills the txid in. `Entry.txid` is
+`str | None`.
+
 ## 0.38.1 (2026-11-05)
 
 Only a wallet whose kept history is missing or ends before the closing block

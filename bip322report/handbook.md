@@ -388,7 +388,10 @@ things fail the check "the accounts' own records agree with the movements":
 an entry dated in the period that no wallet of the statement saw and no
 other account of the holder's records (coins the account sent somewhere
 else, or received from somewhere else), and an amount that disagrees with
-the chain. Both are spelt out in section 1. A move straight from one of the
+the chain. Both are spelt out in section 1. An export that carries no txids
+(an old account's CSV, say) yields entries with `"txid": null`: each is such
+an exception until the holder fills the txid in from the wallet that
+received or sent the coins, which the wallet's block of movements shows. A move straight from one of the
 holder's accounts to another, a withdrawal on the one record and a deposit
 with the same txid on the other, is matched between the two records and
 counted as such; the summary names both sides and their amounts. The summary

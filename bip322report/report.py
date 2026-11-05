@@ -1106,7 +1106,9 @@ def format_summary(report: dict) -> str:
             )
             line += f"; {len(a['between'])} between the holder's accounts: {moves}"
         if a["unmatched"]:
-            line += f"; UNMATCHED {len(a['unmatched'])}: " + "; ".join(_entry_text(e) + " seen by no wallet" for e in a["unmatched"])
+            line += f"; UNMATCHED {len(a['unmatched'])}: " + "; ".join(
+                _entry_text(e) + (" without a txid" if e.get("txid") is None else " seen by no wallet") for e in a["unmatched"]
+            )
         if a["mismatched"]:
             line += f"; MISMATCH {len(a['mismatched'])}: " + "; ".join(
                 f"{_entry_text(e)}, the chain {e['chain_btc']} BTC" for e in a["mismatched"]

@@ -29,7 +29,11 @@ which received it; a ``deposit`` arrived at the account from a wallet, which sen
 paid the account.  ``fee_sat`` is the account's own fee when the record carries it,
 ``address`` the wallet's address for a withdrawal and the account's for a deposit,
 ``reference`` the record's own id; these three, ``currency`` and ``source`` may be left
-out.  Keys beyond these are kept in the file and not read.
+out.  ``txid`` may be null for an entry the record cannot tie to a transaction (an export
+that carries no txids): such an entry matches nothing and, dated in the period, is an
+unmatched entry, an exception on the statement, until the holder fills the txid in from
+the wallet that received or sent the coins.  Keys beyond these are kept in the file and
+not read.
 """
 
 from __future__ import annotations
@@ -60,7 +64,7 @@ class AccountError(ValueError):
 class Entry:
     kind: str  # deposit or withdrawal, from the account's side
     time_utc: str
-    txid: str
+    txid: str | None  # None: the record carries none, so the entry matches nothing
     amount_sat: int
     fee_sat: int | None = None
     address: str | None = None
@@ -130,8 +134,8 @@ def _entry(path: Path, n: int, row) -> Entry:
     if kind not in KINDS:
         raise AccountError(f"{where}: 'kind' must be one of {', '.join(KINDS)}, not {kind!r}")
     txid = row.get("txid")
-    if not isinstance(txid, str) or len(txid) != 64 or set(txid.lower()) - _HEX:
-        raise AccountError(f"{where}: 'txid' is not a transaction id (64 hex characters)")
+    if txid is not None and (not isinstance(txid, str) or len(txid) != 64 or set(txid.lower()) - _HEX):
+        raise AccountError(f"{where}: 'txid' is not a transaction id (64 hex characters), nor null for one the record lacks")
     amount = row.get("amount_sat")
     if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
         raise AccountError(f"{where}: 'amount_sat' is not a whole number of satoshi")
@@ -146,7 +150,7 @@ def _entry(path: Path, n: int, row) -> Entry:
     for key in ("address", "reference"):
         if row.get(key) is not None and not isinstance(row[key], str):
             raise AccountError(f"{where}: '{key}' is not a string")
-    return Entry(kind, str(when), txid.lower(), amount, fee, row.get("address"), row.get("reference"))
+    return Entry(kind, str(when), txid.lower() if txid is not None else None, amount, fee, row.get("address"), row.get("reference"))
 
 
 def find_accounts(holder: Path) -> list[Account]:
@@ -176,19 +180,20 @@ def match_accounts(accounts: list[Account], history: History, period: Period) ->
     elsewhere: dict[tuple[str, str], list[tuple[str, Entry]]] = {}  # (txid, kind) -> the other accounts' entries of that kind
     for account in accounts:
         for e in account.entries:
-            elsewhere.setdefault((e.txid, e.kind), []).append((account.name, e))
+            if e.txid is not None:
+                elsewhere.setdefault((e.txid, e.kind), []).append((account.name, e))
     by_txid: dict[str, dict] = {}
     rows = []
     for account in accounts:
-        groups: dict[str, list[Entry]] = {}
+        groups: dict[str | None, list[Entry]] = {}
         for e in account.entries:
-            groups.setdefault(e.txid, []).append(e)
+            groups.setdefault(e.txid, []).append(e)  # the entries without a txid, under None, match nothing
         in_period = matched = 0
         between: list[dict] = []
         unmatched: list[dict] = []
         mismatched: list[dict] = []
         for txid, group in groups.items():
-            tx = txs.get(txid)
+            tx = txs.get(txid) if txid is not None else None
             if tx is None:
                 for e in group:
                     if not period.start.time < e.time <= period.end.time:

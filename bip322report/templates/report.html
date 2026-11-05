@@ -117,7 +117,7 @@
 </div>
 {% endfor %}
 {% if r.endpoints %}{% for a in r.endpoints.accounts %}{% for e in a.unmatched %}
-<p class="bad">{{ a.name }} records a {{ e.kind }} of {{ e.amount_btc }} on {{ e.time_utc[:10] }}{% if e.reference %} ({{ e.reference }}){% endif %} that no wallet of this statement {% if e.kind == "withdrawal" %}received{% else %}sent{% endif %}.</p>
+<p class="bad">{{ a.name }} records a {{ e.kind }} of {{ e.amount_btc }} on {{ e.time_utc[:10] }}{% if e.reference %} ({{ e.reference }}){% endif %}{% if e.txid is none %} without the transaction it was{% else %} that no wallet of this statement {% if e.kind == "withdrawal" %}received{% else %}sent{% endif %}{% endif %}.</p>
 {% endfor %}{% for e in a.mismatched %}
 <p class="bad">{{ a.name }} records a {{ e.kind }} of {{ e.amount_btc }} on {{ e.time_utc[:10] }}{% if e.reference %} ({{ e.reference }}){% endif %}; the chain shows {{ e.chain_btc }} in {{ tx(e.txid) }}.</p>
 {% endfor %}{% endfor %}{% endif %}
