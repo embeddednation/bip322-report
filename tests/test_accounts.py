@@ -69,11 +69,28 @@ def test_a_record_names_the_other_side_by_the_accounts_own_record(tmp_path, wall
         }
     ]  # fmt: skip
     assert report["unnamed_movements"] == 2  # bb and cc came from nobody the statement can name
+    totals = report["totals"]  # the account's movements stand apart from others' on the first page: the record says whose they are
+    assert (totals["from_accounts_sat"], totals["from_accounts_count"], totals["to_accounts_sat"], totals["to_accounts_count"]) == (
+        50_000_000,
+        1,
+        20_000_000,
+        1,
+    )
+    assert totals["received_sat"] == 35_000_000 and totals["sent_sat"] == 0  # bb and cc, from unnamed payers; dd went to the account
+    assert totals["amount_sat"] == totals["received_sat"] + 50_000_000 - 20_000_000
     summary = format_summary(report)
     assert "  account bitstamp: 2/2 entries of the period matched\n" in summary and "movements without a named far end: 2" in summary
     html = render_html(report)
     assert html.count("bitstamp") >= 2 and "W-777" in html and "D-501" in html and "bitstamp 2 of 2" in html  # ATTENTION: no proofs here
     assert "is named by that account's own record of it, kept with the holder (bitstamp: raw/x.json, sha256 abababababababab…)" in html
+    assert (
+        'Received from the holder\'s accounts</td><td class="num">0.50000000' in html
+        and "1 withdrawal by the accounts' own records" in html
+    )
+    assert 'Sent to the holder\'s accounts</td><td class="num">(0.20000000)' in html and "1 deposit by the accounts' own records" in html
+    assert "counted apart from others" in html and "Received from the holder's accounts" not in render_html(
+        build_report(history, period, label="T")
+    )
     assert "bitstamp" in render_history_html(report) and "W-777" not in render_history_html(report)  # the reader gets the name, not the id
     write_csv(report, tmp_path / "t.csv")
     assert ",bitstamp\n" in (tmp_path / "t.csv").read_text()  # the wallet column, last

@@ -467,8 +467,9 @@ with the chain (no wallet, no txindex), and `pip install bip322-audit`
 script interpreter as a second engine; bip322-report is not needed to verify).
 
 1. **Read the statement.** Page 1: the summary, from the opening holdings
-   through what was received, sent and paid in fees to the closing
-   holdings, which are the holdings on the chain; the opening line names
+   through what was received and sent, from and to others and from and to
+   the holder's own accounts (as their records say), and paid in fees, to
+   the closing holdings, which are the holdings on the chain; the opening line names
    the statement before, whose closing holdings they were. For a holder,
    each wallet's share is listed under the opening holdings and above the
    closing ones. One sentence says what is proven; any failed check

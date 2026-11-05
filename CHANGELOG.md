@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.40.0 (2026-11-05)
+
+The first page tells what moved to and from the holder's own accounts apart
+from others: a movement an account's record matches counts, whole, as
+"Received from the holder's accounts" or "Sent to the holder's accounts",
+with the number of withdrawals or deposits behind it; "Received from
+others" and "Sent to others" no longer carry the round trips through the
+holder's exchange accounts. Totals gain `from_accounts_*` and
+`to_accounts_*` (sat, btc, count), the fiat sums too, and each wallet's sums
+`from_accounts` and `to_accounts`, inside its received and sent.
+
 ## 0.39.0 (2026-11-05)
 
 An entry of a movements file may carry `"txid": null`, for a record that

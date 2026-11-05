@@ -285,9 +285,10 @@ def _wallet_block(
     source: dict | None,
     endpoints: Mapping[str, dict] | None = None,
 ) -> dict:
-    """One wallet of a holder: its opening and closing balance, what it received and sent (from and to others, and from and
-    to the holder's other wallets: ``moved_in`` and ``moved_out`` say how much of each), paid in fees and netted in joint
-    transactions, the sum of its rows' amounts, the period's movements as it sees them, and its history's source.
+    """One wallet of a holder: its opening and closing balance, what it received and sent (from and to others, from and to
+    the holder's other wallets, ``moved_in`` and ``moved_out``, and from and to the holder's accounts, ``from_accounts`` and
+    ``to_accounts``, each saying how much of the received or sent it is), paid in fees and netted in joint transactions, the
+    sum of its rows' amounts, the period's movements as it sees them, and its history's source.
     Opening + received - sent - fees + mixed = closing, for each wallet."""
     o = sum(c.amount_sat for c in opening if c.wallet == wallet)
     s = sum(c.amount_sat for c in closing if c.wallet == wallet)
@@ -299,7 +300,7 @@ def _wallet_block(
     return {**block, "closing_sat": s, "closing_btc": btc(s), "transactions": rows, "history": source}
 
 
-SUMS = ("received", "sent", "fees", "mixed", "moved_in", "moved_out", "written_off")
+SUMS = ("received", "sent", "fees", "mixed", "moved_in", "moved_out", "from_accounts", "to_accounts", "written_off")
 
 
 def _wallets_totals(blocks: list[dict]) -> dict:
@@ -392,6 +393,10 @@ def _wallet_rows(
         endpoint = (endpoints or {}).get(tx.txid)
         if endpoint and kind in ("receive", "send", "mixed"):
             counterpart = _by_record(counterpart, endpoint["account"], kind)
+            if kind == "receive":
+                sums["from_accounts"] += share.get("received", 0)  # inside received: from one of the holder's accounts
+            elif kind == "send":
+                sums["to_accounts"] += share.get("sent", 0)  # inside sent
         row = {
             "txid": tx.txid,
             "height": tx.height,
@@ -500,12 +505,14 @@ def _movement_rows(
     endpoints: Mapping[str, dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """The period's transactions as rows with a running balance and the other side named, and the totals of the period:
-    received from others, sent to others, fees, the net of joint transactions, each in fiat too when rates were given
-    (``totals["fiat"]``; None for a sum some rate was missing for).  For a holder (``holder``) each row also names the
-    wallet of the holder's it touched."""
+    received from others, received from the holder's own accounts (a movement an account's record matches counts whole as
+    such), sent to others, sent to the holder's accounts, fees, the net of joint transactions, each in fiat too when rates
+    were given (``totals["fiat"]``; None for a sum some rate was missing for).  For a holder (``holder``) each row also
+    names the wallet of the holder's it touched."""
     rows = []
     received = sent = fees = mixed = mixed_count = lost = lost_count = 0
-    valued = dict.fromkeys(("received", "sent", "fees", "mixed", "written_off"), Decimal(0))
+    from_accounts = from_count = to_accounts = to_count = 0
+    valued = dict.fromkeys(("received", "from_accounts", "sent", "to_accounts", "fees", "mixed", "written_off"), Decimal(0))
     unvalued = False
     running = opening_sat
     for tx in movements:
@@ -535,11 +542,19 @@ def _movement_rows(
         key = {"receive": "received", "swept": "received", "send": "sent", "mixed": "mixed", "written_off": "written_off"}.get(
             tx.kind
         )  # swept: dust the wallet spent, booked where it was spent; written_off: a coin declared lost, leaving the books
-        sign = -1 if key in ("sent", "written_off") else 1
+        if key in ("received", "sent") and row["endpoint"] and tx.kind != "swept":
+            key = "from_accounts" if key == "received" else "to_accounts"  # the account's own record says the other side is the holder's
+        sign = -1 if key in ("sent", "to_accounts", "written_off") else 1
         if key == "received":
             received += amount
+        elif key == "from_accounts":
+            from_accounts += amount
+            from_count += 1
         elif key == "sent":
             sent += -amount
+        elif key == "to_accounts":
+            to_accounts += -amount
+            to_count += 1
         elif key == "mixed":
             mixed += amount
             mixed_count += 1
@@ -552,13 +567,19 @@ def _movement_rows(
             fees += tx.fee_sat
             if rates and row["fiat"]["fee"] is not None:
                 valued["fees"] += Decimal(row["fiat"]["fee"])
-    amount_sat = received - sent + mixed - lost  # the sum of the rows' amounts: an internal move's is zero
+    amount_sat = received + from_accounts - sent - to_accounts + mixed - lost  # the sum of the rows' amounts: an internal move's is zero
     net_sat = running - opening_sat
     totals = {
         "received_sat": received,
         "received_btc": btc(received),
+        "from_accounts_sat": from_accounts,
+        "from_accounts_btc": btc(from_accounts),
+        "from_accounts_count": from_count,
         "sent_sat": sent,
         "sent_btc": btc(sent),
+        "to_accounts_sat": to_accounts,
+        "to_accounts_btc": btc(to_accounts),
+        "to_accounts_count": to_count,
         "mixed_sat": mixed,
         "mixed_btc": btc(mixed),
         "mixed_count": mixed_count,
